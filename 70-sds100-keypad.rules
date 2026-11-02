@@ -1,0 +1,5 @@
+# MINI KeyBoard macro keypad (USB 1189:8890) for SDS100 Monitor:
+# lets the logged-in desktop user read the keypad in the background and program it.
+# Must sort before 73-seat-late.rules for "uaccess" to take effect.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{idVendor}=="1189", ATTRS{idProduct}=="8890", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ATTRS{idVendor}=="1189", ATTRS{idProduct}=="8890", MODE="0660", TAG+="uaccess"
