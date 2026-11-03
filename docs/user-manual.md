@@ -1,12 +1,12 @@
 # SDS100 Monitor User Manual
 
-Version 1.1.61 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
+Version 1.1.62 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
 
 Use the outline button (☰) at the top right of this file to jump to a chapter.
 
 ## About this manual
 
-This manual describes **SDS100 Monitor version 1.1.61**, a Linux program for monitoring and controlling a Uniden SDS100 scanner from a PC over its USB cable. It runs on desktop Linux PCs and on the Raspberry Pi (chapter 25).
+This manual describes **SDS100 Monitor version 1.1.62**, a Linux program for monitoring and controlling a Uniden SDS100 scanner from a PC over its USB cable. It runs on desktop Linux PCs and on the Raspberry Pi (chapter 25).
 
 The chapters follow the program's menus and panels. Chapters 1 to 4 cover installing, connecting and the main window, and are worth reading first. The rest can be read as you need them.
 
@@ -91,7 +91,7 @@ SDS100 Monitor is installed as a Debian package, which apt sets up together with
 1. Download `sds100-monitor_<version>_all.deb` from the project's releases page, **github.com/jmlynchjr/SDS-MONITOR/releases**.
 2. In a terminal, in the folder you downloaded it to, run:
 
-   `sudo apt install ./sds100-monitor_1.1.61_all.deb`
+   `sudo apt install ./sds100-monitor_1.1.62_all.deb`
 
    (use the version you downloaded). apt also installs PyQt6 and pyserial if they're missing, and Qt Multimedia and `ffmpeg`, which PC audio capture needs (chapter 9).
 
@@ -198,6 +198,9 @@ Commands still waiting to be sent when you disconnect or close the program are s
 ### Panels
 
 The main window holds four panels. By default they're tabs along the bottom of the window:
+
+![The main window: SDS100 Keypad, Scanner Control, Scanner Information and Live Monitor.](images/main-window.png)
+
 
 | Panel | Contents |
 |---|---|
@@ -347,6 +350,9 @@ Each file has the columns Start, End, Duration (s), System, Department, Channel,
 
 **History → Browse CSV archives…** (also **BROWSE HISTORY ARCHIVES…** in the panel) opens any daily CSV, or the old single history file from early versions. It shows 250 rows per page, with search and **export of matching rows**. Archives are read-only.
 
+![History → Browse History Archives…](images/archive-browser.png)
+
+
 ## 6. Controlling the scanner
 
 ### Scanner Control panel
@@ -420,6 +426,9 @@ Right-click a key → **Keypress Protocol Diagnostic** opens an experimental too
 
 **View → Scanner Screen…** (or **Tools → Scanner Screen…**) opens a live copy of the scanner's display in its own window.
 
+![Tools → Scanner Screen…: a live copy of the scanner's display, with its keys.](images/scanner-screen.png)
+
+
 - It shows every text line, large and small lines, highlighted and underlined characters, and the scanner's colour mode (colour, black or white background).
 - The **alert LED** is shown as a coloured dot under the screen. The status line says when the scanner is in a menu, direct entry or waterfall mode.
 - Keys under the screen: SOFT 1–3, MENU, knob ◀ / PUSH / ▶, FUNC, ./NO, E/YES, AVOID and REPLAY. You can work through the scanner's menus from the PC while watching the result.
@@ -472,6 +481,9 @@ The window reopens at start-up if it was open when you quit. If the scanner refu
 1. Click **LOAD FAVORITES LISTS**.
 2. Expand a favorites list to see its systems, then departments or sites, then channels or talkgroups. Each level is read from the scanner when you expand it.
 
+![Scanner Tools → Lists: the Favorites Lists, with monitor state and quick keys.](images/tools-lists.png)
+
+
 Right-click any system, department, site, channel or talkgroup to:
 - **hold** on it;
 - **temporarily avoid** or **permanently avoid** it (asks first);
@@ -484,13 +496,22 @@ This works for any item in the lists, not just the one on screen. The avoid colu
 
 Favorites list, system and department **quick keys** are shown as 10 × 10 grids: green means enabled, grey disabled, and blank not assigned. Click a key to turn it on or off. Choose which favorites list and system the lower grids show. Favorites list names appear in tooltips once the Lists tab has loaded them.
 
+![Scanner Tools → Quick Keys.](images/tools-quick-keys.png)
+
+
 ### Service Types
 
 The 30 preset and 10 custom **service types** as checkboxes. **READ** them from the scanner, change them, then **APPLY**. **ALL ON** and **ALL OFF** are shortcuts.
 
+![Scanner Tools → Service Types.](images/tools-service-types.png)
+
+
 ### Location
 
 Read and set the scanner's **latitude, longitude and range** (`LCR`). The scanner must be read first, so the program can send changes in the same number format; it reads back to confirm.
+
+![Scanner Tools → Location (the position is blurred here).](images/tools-location.png)
+
 
 **Saved places** store locations by name. Double-click a saved place to send it to the scanner. Saved places also count as landmarks for Places and Map (chapter 17).
 
@@ -499,6 +520,9 @@ To keep the location updated automatically as you move, use GPS (chapter 17).
 ### Alerts
 
 Alert rules raise a **desktop notification** and a **sound** when a matching reception happens. Examples:
+
+![Scanner Tools → Alerts (rule texts blurred).](images/tools-alerts.png)
+
 
 - *Channel* is *Sheriff East Dispatch*
 - *Talkgroup* is *TGID:44002*
@@ -519,6 +543,9 @@ Unit rules with "is exactly" match on the unit number, so they keep working afte
 ## 8. Waterfall
 
 **View → Waterfall…** opens the waterfall in its own window, which can be moved, resized and maximized. The live graph is on the left and takes any extra space. The controls are in a column on the right, with a draggable divider between them. The window reopens at start-up if it was open when you quit.
+
+![The waterfall window with the live graph.](images/waterfall.png)
+
 
 ### Starting the waterfall
 
@@ -649,6 +676,9 @@ List the names and words your agencies use, such as unit names, station names, s
 
 ### The Transcription window
 
+
+![View → Transcription…, with ten codes decoded.](images/transcription.png)
+
 - The list shows time, channel, talkgroup, units (with your names), length and transcript.
 - **Transcribe new calls** transcribes every new MP3 automatically; untick it to stop.
 - **TRANSCRIBE THIS DAY** does a day's older recordings. New calls go ahead of them.
@@ -676,6 +706,9 @@ The SDS100 reports a P25 or DMR radio's **unit ID** (UID) number, but not the na
 ### Unit ID Log
 
 Every unit heard is logged, one row each time a different unit transmits:
+
+![History → Unit ID Log…](images/unit-id-log.png)
+
 
 `~/SDS100Monitor/unit_ids/unit_ids_YYYY-MM-DD.csv`
 
@@ -719,6 +752,9 @@ Double-click a unit in the Unit ID Log, or use **History → Unit Profile…** a
 
 **History → Unit Name Suggestions…** learns radio names from transcripts (chapter 10).
 
+![Unit Name Suggestions from call signs heard in transcripts.](images/unit-suggestions.png)
+
+
 - When a radio is the only one on a transcribed call, and the speaker starts with a call sign (*"Engine 12 on scene"*, *"Dispatch, Medic 4 en route"*, *"Engine one two available"*), that counts as a vote for that radio's name.
 - A suggestion needs **2 votes** and **60%** of the radio's call-sign calls. **High** confidence is 4 or more votes and 80% or more.
 - A radio that gives several different call signs is marked *probably a dispatcher or a shared radio* and gets no suggestion.
@@ -735,6 +771,9 @@ The lower list shows the calls behind a suggestion; double-click one to listen. 
 
 **History → Fleet Map…** sketches which agency, unit type or shift each radio belongs to, from the unit ID log for the last 7, 30 or 90 days, or everything.
 
+![Fleet Map: radios grouped by talkgroup and ID block.](images/fleet-map.png)
+
+
 - **Fleets:** a radio's fleet is the talkgroup it keys up on most. Each fleet shows how many radios it has, its keyups, its **active hours** (the hours holding 90% of its traffic, such as 07–15), other talkgroups it uses, when it was last heard, and the first word of its named radios (e.g. *Engine*).
 - **ID blocks:** within a fleet, radios are grouped into blocks of nearby ID numbers (within 100, adjustable). Blocks with different active hours often mean different shifts or units. For example, IDs 20100–20107 might be active 07–15 and 20500–20505 active 15–06.
 - **Radios:** each shows its ID and name (the scanner's own name in [brackets] if you haven't named it), keyups, active hours and other talkgroups. Unnamed radios show the nearest named radios in their block (*near Engine 12, Engine 15*) as a hint. Radios on 5 or more talkgroups, or named Dispatch or Console, are marked *console / command radio?*.
@@ -747,6 +786,9 @@ Double-click a radio for its profile. Right-click to name it or search for it, o
 ### Activity Charts
 
 **History → Activity Charts…** shows:
+
+![Activity Charts for the last 30 days.](images/activity-charts.png)
+
 - receptions by hour of day;
 - receptions per day (per month for long periods);
 - the top 15 channels or talkgroups.
@@ -773,6 +815,9 @@ The period can be the last 7, 30, 90 or 365 days, or all history. You can filter
 ### Incidents
 
 **History → Incidents…** joins calls into **incidents** and shows each as a timeline. It uses reception history, the unit ID log and transcripts.
+
+![Incidents (headlines and places blurred).](images/incidents.png)
+
 
 **How calls are joined:**
 - Two calls belong together when the same radio is in both, up to **10 minutes** apart (adjustable).
@@ -846,6 +891,9 @@ Choose a service:
 ## 13. Discovery
 
 The SDS100's **Discovery** mode looks for active frequencies (Conventional Discovery) or talkgroups (Trunk Discovery) in a range or system. You set up sessions on the scanner; SDS100 Monitor starts them, follows what they find, and logs the hits.
+
+![The Discovery window.](images/discovery.png)
+
 
 ### The Discovery menu
 
@@ -966,6 +1014,9 @@ Only one function runs at a time, and selecting a tab doesn't change what the sc
 
 Signal (S), decode quality (Q) and activity (A) as bars from 0 to 100, with system and site names, system, sub and site IDs, WACN, NAC, colour code, RAN, area, attenuator, number of frequencies and decode type.
 
+![Analyze → System Status.](images/analyze-status.png)
+
+
 #### Site health over time
 
 While System Status runs, S, Q and A are averaged over an interval and drawn on a graph, along with the **lowest Q** in each interval.
@@ -982,6 +1033,9 @@ While System Status runs, S, Q and A are averaged over an interval and drawn on 
 ### Current Activity
 
 Every channel of the site, updated 5 times a second, with the columns LCN, frequency, type (control channel, talkgroup, patch, I-call…), talkgroup, talkgroup name (from your reception history), unit ID (with your name for it), mode (analog, digital, encrypted), system ID, site ID, **On air** (how long the current call has lasted) and **Last call**.
+
+![Analyze → Current Activity, with channel load.](images/analyze-activity.png)
+
 
 | Row colour | Meaning |
 |---|---|
@@ -1009,6 +1063,9 @@ Below the table, **CHANNEL LOAD** measures how busy the site is:
 
 Decoded **control-channel messages**, with the scanner's time stamp, the message and its details: voice channel grants (channel, talkgroup and the unit talking), grant updates, patches, network and RFSS status broadcasts, identifier updates, and more.
 
+![Analyze → Activity Log.](images/analyze-log.png)
+
+
 - **Save to ~/SDS100Monitor/activity_log** writes a daily CSV with PC time, scanner time, system, site, data, message and details.
 - **Show sync broadcasts:** P25 synchronization (time) broadcasts arrive several times a second and carry only the time. The SDS100 labels them *"Add Harris Patch ID"*. They're hidden and not saved unless this is ticked; the count beside it shows how many were hidden.
 - Lines the scanner sends twice are dropped. **Filter**, **CLEAR** and **OPEN FOLDER** are at the top.
@@ -1028,6 +1085,9 @@ LCN Finder doesn't work on P25 systems, which send their own channel numbers; th
 ### Found IDs
 
 The **Found IDs** tab collects every **talkgroup** and **unit** seen in Current Activity and the Activity Log, including ones you don't scan. It is filled in while either of those runs, and kept between sessions.
+
+![Analyze → Found IDs.](images/analyze-found-ids.png)
+
 
 Columns: kind, ID, status, name, transmissions, first seen, last seen, **seen with** (the units a talkgroup was heard with, or the talkgroups a unit used), and notes (encrypted, patched with…, or the scanner showing the type as *Unknown*).
 
@@ -1078,6 +1138,9 @@ On the **Run** tab:
 2. Press **START RUN**. Live readings, progress and per-reference results are shown as it goes.
 3. **SKIP** keeps what the current reference has measured so far and moves on. **STOP** keeps everything measured.
 
+![Antenna Test → Run.](images/antenna-run.png)
+
+
 The scanner goes back to scanning at the end (optional). Every run is saved to `~/SDS100Monitor/antenna_tests` as it happens, including a stopped run or one cut off by a disconnect.
 
 **Waterfall noise-floor snapshot:** with the scanner in waterfall mode on a band, **CAPTURE SNAPSHOT** averages 20 frames and adds them to the run. Use the same centre, span and RF gain for every antenna. Levels are the scanner's raw waterfall units, not dBm.
@@ -1085,6 +1148,9 @@ The scanner goes back to scanning at the end (optional). Every run is saved to `
 ### Comparing
 
 On the **Compare** tab, tick the runs to compare.
+
+![Antenna Test → Compare.](images/antenna-compare.png)
+
 
 - Each reference gets a row per measure, with the difference from the oldest ticked run and a **Best** column.
 - A difference only counts when it's bigger than about 2 dB (RSSI), 5 points (Q or S) or 20% (counts). Otherwise the result says *≈ no clear difference*.
@@ -1120,6 +1186,11 @@ The **GPS** indicator in the status bar is green with a fix, amber while waiting
 ### Places and Map
 
 **Tools → Places and Map…** picks out places mentioned in **transcripts** (chapter 10), looks them up, and shows them on a map.
+
+![Tools → Places and Map… (places and transcripts blurred).](images/places-table.png)
+
+![The map in the browser, with the places heard in the last 24 hours (the list is blurred).](images/places-map.png)
+
 
 **What's found:**
 - addresses (*400 Main Street*, *1234 N. Elm Ave*, *200 block of Smith Lane*);
@@ -1225,6 +1296,9 @@ When you press a keypad key, the window highlights its row and shows what was se
 
 **View → Theme** changes how the program looks. Changes apply straight away to every open window and are remembered.
 
+![View → Theme: mode, accent and text size.](images/themes.png)
+
+
 ### Mode
 
 | Mode | Description |
@@ -1255,6 +1329,9 @@ When you press a keypad key, the window highlights its row and shows what was se
 ## 20. Weather Alert, Tone-Out and scanner recordings
 
 The **Modes** menu runs two of the scanner's special modes from the PC, with alerts, and plays the recordings stored on the scanner. **Modes → Weather and Tone-Out…** opens a window with both modes and the alerts heard.
+
+![Modes → Weather and Tone-Out…](images/weather-toneout.png)
+
 
 ### Weather Alert
 
@@ -1307,6 +1384,8 @@ Your location comes from the GPS (chapter 17), then the scanner's own location s
 
 The top line shows your location and the agency last heard.
 
+
+
 - **Show:**
   - *Best match here* lists each code once, from the best list.
   - *All lists that apply here* shows every applicable list's meaning side by side, the best in bold.
@@ -1336,6 +1415,9 @@ The Transcription window decodes codes heard in calls (chapter 10). It recognise
 ## 22. Daily reports
 
 **History → Daily Report…** sums up one day on one page:
+
+![History → Daily Report…](images/daily-report.png)
+
 
 - **Summary:** receptions, time on air, first and last call, the busiest hour, systems, radios heard (and how many are new), incidents, transcribed calls, and Weather/Tone-Out alerts.
 - **Activity by hour**, as a bar chart.
@@ -1412,7 +1494,7 @@ Use **Raspberry Pi OS 64-bit, with desktop** (Bookworm or newer), on a good micr
 
 3. Download `sds100-monitor_<version>_all.deb` on the Pi (from the releases page in its web browser), and install it in a terminal, in the folder you downloaded it to:
 
-   `sudo apt install ./sds100-monitor_1.1.61_all.deb`
+   `sudo apt install ./sds100-monitor_1.1.62_all.deb`
 
    The package is the same one as for a PC: it's pure Python, marked *all* for every processor.
 
@@ -1455,6 +1537,9 @@ The Pi's desktop isn't KDE, so the **System** theme follows Qt's own light or da
 ## 26. Aircraft (ADS-B)
 
 If you also run an ADS-B receiver on the same PC, with **readsb** or **dump1090** and an RTL-SDR dongle, the Monitor can read its aircraft list. It then alerts on emergency squawks and watched aircraft, and works out which aircraft go with the callsigns heard in airband transcripts. It works alongside tar1090 and graphs1090, which you don't need to change.
+
+![Tools → Aircraft (ADS-B)…](images/aircraft.png)
+
 
 Open it with **Tools → Aircraft (ADS-B)…**.
 

@@ -2,6 +2,11 @@
 
 Newest first. Versions before 1.1.47 were tested by hand on a real SDS100; from 1.1.47 on, every version also passes the automated tests.
 
+## v1.1.62: Keypad internals
+
+- The Macro Keypad tells other windows when an action changes. No visible change in this edition.
+
+
 ## v1.1.61: EXIT MENU closes the Scanner Menu window
 
 - **✕ EXIT MENU** in Tools → Scanner Menu now also closes the window, once the scanner confirms it has left the menu and gone back to scanning. ◀ BACK still keeps the window open.

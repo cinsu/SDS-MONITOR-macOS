@@ -33,7 +33,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.1.61"
+VERSION = "1.1.62"
 
 # Qt 6.10's new PipeWire audio backend can crash the program while it lists audio devices at
 # start (segmentation fault inside PipeWire, seen with Qt 6.10.2 / PipeWire 1.6.2; it also prints
@@ -7378,6 +7378,7 @@ KEYPAD_DEFAULTS = {
 class MacroKeypad(QObject):
     """Owns the keypad listener, the bindings and the Tools → Macro Keypad window."""
     changed = pyqtSignal()
+    actions_changed = pyqtSignal()            # what a key or knob does (v1.1.62)
     activity = pyqtSignal(str, str)           # target (or ""), combo
 
     def __init__(self, monitor):
@@ -7456,6 +7457,7 @@ class MacroKeypad(QObject):
     def set_action(self, target, action):
         self.bindings[target]["action"] = action
         self.save()
+        self.actions_changed.emit()
 
     def set_combo(self, target, combo):
         for other, entry in self.bindings.items():
@@ -7473,6 +7475,7 @@ class MacroKeypad(QObject):
                 entry["action"] = KEYPAD_DEFAULTS.get(target, "")
         self.save()
         self.changed.emit()
+        self.actions_changed.emit()
 
     def save(self):
         s = self.monitor.settings
@@ -7645,6 +7648,8 @@ class MacroKeypad(QObject):
         if self.window is None:
             self.window = MacroKeypadWindow(self)
         self.window.open()
+
+
 
 
 class MacroKeypadWindow(QWidget):
@@ -19146,6 +19151,7 @@ class Monitor(QMainWindow):
         self.aircraft_window = None
         self.menu_parts = []              # a long scanner menu arrives in parts (v1.1.59)
         self.menu_parts_timer = None
+        self.keypad_layout_window = None
         self.report_saver = ReportSaver(self)
         self.report_saver.saved.connect(lambda text: self.statusBar().showMessage(text, 10000))
         self.daily_report_window = None
@@ -22371,7 +22377,7 @@ class Monitor(QMainWindow):
                        self.search_window, self.fleet_window, self.places_window,
                        self.antenna_window, self.close_call_window, self.modes_window,
                        self.screc_window, self.ten_codes_window, self.daily_report_window,
-                       self.aircraft_window):
+                       self.aircraft_window, self.keypad_layout_window):
             if window is not None:
                 window.save_settings(self.settings)
         if self.transcription_window is not None:
