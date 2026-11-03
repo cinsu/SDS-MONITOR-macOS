@@ -55,6 +55,9 @@ Once the .deb is installed, every folder install in your home is an old version:
 - V24 is the last version with the database/favorites panel, so the preview reminds you about `--keep 24` if it is installed.
 - Reception history (`~/SDS100Monitor`), `~/SDS100MonitorData` and all CSV, HPDB and Favorites List files are never touched.
 
+Beta Testers Wanted
+If you have an SDS150 or SDS200 and would be interested in beta testing features specific to those units please contact me.
+
 ## Credits and licence
 
 SDS100 Monitor is by J. Lynch, developed with the help of AI (Anthropic's Claude), and tested on a real SDS100.
