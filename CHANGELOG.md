@@ -2,6 +2,31 @@
 
 Newest first. Versions before 1.1.47 were tested by hand on a real SDS100; from 1.1.47 on, every version also passes the automated tests.
 
+## v1.1.61: EXIT MENU closes the Scanner Menu window
+
+- **✕ EXIT MENU** in Tools → Scanner Menu now also closes the window, once the scanner confirms it has left the menu and gone back to scanning. ◀ BACK still keeps the window open.
+- Tests: 128.
+
+## v1.1.60: Scanner Menu shows each change
+
+- **Fixed (1.1.59): switching a list On or Off in Select Lists to Monitor didn't show.** The scanner made the change, but the window kept showing the old On/Off values, so it looked as if nothing happened (and a second click switched the list back). The list is now redrawn with every reply from the scanner, keeping your place in it.
+- After you leave Select Lists to Monitor, the SDS100 can take several seconds (about 9 in one test) to load the lists you chose; give it a moment before pressing BACK or EXIT again.
+- Tests: 126.
+
+## v1.1.59: Every Favorites List in the Scanner Menu
+
+- **Fixed: Tools → Scanner Menu showed only part of a long menu.** The SDS100 sends a long menu, such as **Select Lists to Monitor** with many Favorites Lists, in parts (the first 18 entries, then the rest). Only the last part was shown, so lists from Full Database to NC-Polk County were missing. The parts are now joined, and all lists are shown in the scanner's order. The Command Console still shows each part as it arrives.
+- Tests: 125 (a real two-part Select Lists to Monitor reply from an SDS100).
+
+## v1.1.58: Aircraft from ADS-B (readsb)
+
+- **New: Tools → Aircraft (ADS-B)…** reads the aircraft list that readsb (or dump1090) writes on this computer, `/run/readsb/aircraft.json`, found automatically; or tar1090's copy, `http://127.0.0.1/tar1090/data/aircraft.json`, or any address you enter. It also reads readsb's receiver position, so distances are from your antenna. It switches itself on when readsb is found.
+- **Emergency squawk alerts:** a desktop and phone alert when an aircraft squawks **7700** (emergency), **7600** (radio failure) or **7500** (hijack), or reports an emergency, with its callsign, registration, type, altitude, speed and distance. Optionally only within a distance. At most one alert per aircraft and code every 30 minutes. Phone Alerts has a new category, **Aircraft**.
+- **Watch list:** callsigns, registrations or hex codes (with * for a start, such as `N911*` or `RCH*`); an alert when one is seen, at most every two hours.
+- **Callsigns in airband transcripts:** *Delta twelve thirty-four*, *Southwest 2 2 1 1*, *November one two three alpha bravo* or *Cessna four five alpha* are matched to the aircraft in range at the time of the call, shown under the transcript (callsign, registration, type, altitude, speed, distance) and listed under **Heard on the radio today**. About 70 airline and operator radio names are known; a callsign not seen by ADS-B is still shown. Only airband channels (108–137 and 225–400 MHz) by default.
+- Saved in `~/SDS100Monitor/adsb/` (alerts and matched callsigns, one file per day).
+- Tests: 118 (aircraft.json from readsb, alerts and their limits, watch lists, spoken callsigns and numbers, matching, airband detection, the window and transcripts).
+
 ## v1.1.57: Project links
 
 - The project page, About box and update check now point to the project's repository, https://github.com/jmlynchjr/SDS-MONITOR (1.1.56 used a repository name that doesn't exist).

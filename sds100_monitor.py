@@ -33,7 +33,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.1.57"
+VERSION = "1.1.61"
 
 # Qt 6.10's new PipeWire audio backend can crash the program while it lists audio devices at
 # start (segmentation fault inside PipeWire, seen with Qt 6.10.2 / PipeWire 1.6.2; it also prints
@@ -6276,6 +6276,46 @@ MENU_IDS = [
 ]
 
 
+def menu_footer(xml):
+    """(part number, last part?) from an MSI reply's <Footer No=".." EOT=".."/>; (1, True) if none."""
+    try:
+        footer = ET.fromstring(xml).find("Footer")
+    except ET.ParseError:
+        return 1, True
+    if footer is None:
+        return 1, True
+    try:
+        number = int(footer.attrib.get("No", "1"))
+    except ValueError:
+        number = 1
+    return number, footer.attrib.get("EOT", "1") != "0"
+
+
+def merge_menu_parts(parts):
+    """One MSI document from a menu sent in parts (a long menu, such as Select Lists to Monitor
+    with many Favorites Lists, comes as Footer No="1" EOT="0", No="2" EOT="1", …)."""
+    root = ET.fromstring(parts[0])
+    seen = set()
+    for element in list(root):
+        if element.tag == "Footer":
+            root.remove(element)
+        elif element.tag == "MenuItem":
+            seen.add(element.attrib.get("Index"))
+    for part in parts[1:]:
+        for element in ET.fromstring(part):
+            if element.tag == "Footer":
+                continue
+            if element.tag == "MenuItem":
+                if element.attrib.get("Index") in seen:
+                    continue
+                seen.add(element.attrib.get("Index"))
+            elif root.find(element.tag) is not None:
+                continue                    # MenuInput etc. once
+            root.append(element)
+    ET.SubElement(root, "Footer", {"No": "1", "EOT": "1"})
+    return ET.tostring(root, encoding="unicode")
+
+
 def parse_menu(xml):
     """Parse an MSI document into a dict. The spec lists the elements but not
     how they nest, so everything is searched for wherever it appears."""
@@ -6403,8 +6443,8 @@ class ScannerMenuWindow(QWidget):
                                       self.back, "#536779"))
         buttons.addWidget(self.button("REFRESH", "Read the menu again (MSI)",
                                       self.refresh, "#344d71"))
-        buttons.addWidget(self.button("✕ EXIT MENU", "Leave the menu and return to "
-                                      "scanning (MSB)", self.exit_menu, "#bd6b23"))
+        buttons.addWidget(self.button("✕ EXIT MENU", "Leave the menu, return to "
+                                      "scanning (MSB) and close this window", self.exit_menu, "#bd6b23"))
         layout.addLayout(buttons)
         options = QHBoxLayout()
         self.auto_refresh = QCheckBox("Follow the scanner (re-read every second)")
@@ -6571,6 +6611,12 @@ class ScannerMenuWindow(QWidget):
                     if command.startswith(("MSV,0", "MSB,0")) and self.rsv == "":
                         self.rsv = "0"           # the scanner wanted RSV=0
                         self.monitor.settings.setValue("menu/rsv", "0")
+                    if "RETURN_PREVOUS_MODE" in command:
+                        # EXIT MENU: the scanner is back to scanning, so this window closes too (v1.1.61).
+                        self.say("✓ Left the menu.", "ok")
+                        self.show_menu(None)
+                        self.close()
+                        return False
                     self.say("✓ Done.", "ok")
                     self.refresh()
                 elif retry:
@@ -6608,19 +6654,23 @@ class ScannerMenuWindow(QWidget):
                     menu["type"], menu["type"])
         current = f"Current setting: {menu['value']}" if menu["value"] else ""
         set_text(self.current, " • ".join(x for x in (kind, current) if x))
-        if not same:
-            self.items.clear()
-            selected_row = -1
-            for row, item in enumerate(menu["items"]):
-                text = item["name"] + (f"  —  {item['value']}" if item["value"] else "")
-                entry = QListWidgetItem(("✓ " if item["selected"] else "    ") + text)
-                if item["selected"]:
-                    entry.setForeground(tc("#7ee3a5"))
-                    selected_row = row
-                self.items.addItem(entry)
-            self.items.setCurrentRow(selected_row if selected_row >= 0 else 0)
-        elif keep_row >= 0:
+        # Always rebuilt: the same entries can come back with new values (a list switched
+        # On or Off by SELECT); only the highlighted row is kept (v1.1.59).
+        scroll = self.items.verticalScrollBar().value() if same else 0
+        self.items.clear()
+        selected_row = -1
+        for row, item in enumerate(menu["items"]):
+            text = item["name"] + (f"  —  {item['value']}" if item["value"] else "")
+            entry = QListWidgetItem(("✓ " if item["selected"] else "    ") + text)
+            if item["selected"]:
+                entry.setForeground(tc("#7ee3a5"))
+                selected_row = row
+            self.items.addItem(entry)
+        if same and keep_row >= 0:
             self.items.setCurrentRow(keep_row)
+            self.items.verticalScrollBar().setValue(scroll)
+        else:
+            self.items.setCurrentRow(selected_row if selected_row >= 0 else 0)
         field = menu["input"] or menu["location"]
         self.input_box.setVisible(field is not None)
         if field is not None:
@@ -8495,6 +8545,11 @@ class TranscriptionWindow(QWidget):
         self.codes_note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         set_css(self.codes_note, "color:#ffcf7a;font-weight:600;")
         dl.addWidget(self.codes_note)
+        self.aircraft_note = make_label("")
+        self.aircraft_note.setWordWrap(True)
+        self.aircraft_note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        set_css(self.aircraft_note, "color:#8bd6f2;font-weight:600;")
+        dl.addWidget(self.aircraft_note)
         buttons = QHBoxLayout()
         self.play_btn = QPushButton("▶ PLAY")
         self.play_btn.clicked.connect(lambda: self.play(self.current()))
@@ -8559,6 +8614,13 @@ class TranscriptionWindow(QWidget):
                 if item is not None:
                     set_text(item, self.pending_text(entry[0]))
 
+    def heard_changed(self, row):
+        """Aircraft were matched in a new transcript: show them."""
+        if row[0][:10] == self.days.currentText():
+            self.heard = heard_by_file(row[0][:10])
+            self.fill()
+            self.show_selected()
+
     def decode_toggled(self, on):
         self.monitor.settings.setValue("tencodes/decode", "true" if on else "false")
         self.fill()
@@ -8605,6 +8667,7 @@ class TranscriptionWindow(QWidget):
         if day:
             audio = read_audio_index(audio_index_path(datetime.strptime(day, "%Y-%m-%d")))
             texts = read_transcripts(day)
+            self.heard = heard_by_file(day)
             self.entries = [[row, texts.get(row[-1])] for row in audio]
             self.entries.sort(key=lambda e: e[0][0], reverse=True)
         self.fill()
@@ -8669,6 +8732,8 @@ class TranscriptionWindow(QWidget):
             said = (tr[8] or "(no speech)") if tr else self.pending_text(audio)
             if codes:
                 said += "\n→ " + " · ".join(f"{code} {meaning}" for _raw, code, meaning, _l in codes)
+            for plane in getattr(self, "heard", {}).get(audio[-1], []):
+                said += "\n" + heard_line(plane)
             values = [audio[0][11:], audio[5], talkgroup, self.units_text(audio[9]),
                       f"{audio[12]} s", said]
             for c, value in enumerate(values):
@@ -8707,6 +8772,7 @@ class TranscriptionWindow(QWidget):
             set_text(self.detail_title, "Select a call to see its transcript.")
             self.detail.clear()
             self.codes_note.setVisible(False)
+            self.aircraft_note.setVisible(False)
             return
         audio, tr = entry
         talkgroup = audio[7] if audio[7] not in ("", "—") else audio[6]
@@ -8719,6 +8785,9 @@ class TranscriptionWindow(QWidget):
         set_text(self.codes_note, "Ten codes: " + "   •   ".join(
             f"“{raw}” = {code} {meaning} ({name})" for raw, code, meaning, name in codes))
         self.codes_note.setVisible(bool(codes))
+        planes = getattr(self, "heard", {}).get(audio[-1], [])
+        set_text(self.aircraft_note, "\n".join(heard_line(p) for p in planes))
+        self.aircraft_note.setVisible(bool(planes))
 
     # -- actions -------------------------------------------------------------------
     def play(self, entry):
@@ -10441,13 +10510,14 @@ PHONE_CATEGORIES = [("activity", "Unusual activity (Activity Watch)"),
                     ("close_call", "New Close Call frequency / watched frequency"),
                     ("tone_out", "Tone-Out: tones detected (fire/EMS paging)"),
                     ("wx_alert", "Weather alerts (NOAA Weather Alert mode)"),
+                    ("aircraft", "Aircraft: emergency squawks and watched aircraft (ADS-B)"),
                     ("keyword", "Keyword alerts (Transcript rules)"),
                     ("alert", "Other alert rules (channel, talkgroup, unit…)")]
 PHONE_DEFAULT_CATEGORIES = {"activity", "new_talkgroup", "keyword", "close_call",
-                            "tone_out", "wx_alert"}
+                            "tone_out", "wx_alert", "aircraft"}
 # Categories added after a user may have saved their choices: on unless they
 # untick them (their saved list is from before these existed).
-PHONE_LATER_CATEGORIES = {"tone_out", "wx_alert"}
+PHONE_LATER_CATEGORIES = {"tone_out", "wx_alert", "aircraft"}
 PHONE_FIELDS = ["ntfy_server", "ntfy_topic", "ntfy_token", "ntfy_priority",
                 "pushover_token", "pushover_user", "telegram_token", "telegram_chat",
                 "smtp_host", "smtp_port", "smtp_security", "smtp_user", "smtp_password",
@@ -18320,6 +18390,670 @@ class UpdateDialog(QDialog):
         super().reject()
 
 
+# ---- Aircraft: ADS-B from readsb (v1.1.58) -----------------------------------------------------
+#
+# Reads the aircraft list that readsb (or dump1090) writes on this computer, usually
+# /run/readsb/aircraft.json, or tar1090's copy over HTTP. With it the Monitor:
+#   * alerts on emergency squawks (7500, 7600, 7700) and on aircraft in your watch list;
+#   * matches the callsigns heard in airband transcripts ("Delta twelve thirty-four",
+#     "November one two three alpha bravo", "Cessna four five alpha") to the aircraft that were in
+#     range at the time, and shows them under the transcript.
+# Only files on this computer (or the address you set) are read; nothing is sent anywhere.
+
+ADSB_DIR = DATA_DIR / "adsb"
+ADSB_SOURCES = ["/run/readsb/aircraft.json", "/run/adsb/aircraft.json", "/run/dump1090-fa/aircraft.json",
+                "/run/dump1090/aircraft.json", "/run/dump1090-mutability/aircraft.json",
+                "/run/skyaware978/aircraft.json"]
+ADSB_URL = "http://127.0.0.1/tar1090/data/aircraft.json"
+ADSB_HISTORY_S = 3600                 # how long positions are kept for matching late transcripts
+ADSB_MATCH_WINDOW_S = 120             # aircraft seen this close to a call can be the one heard
+EMERGENCY_SQUAWKS = {"7500": "hijack", "7600": "radio failure", "7700": "emergency"}
+EMERGENCY_FIELD = {"general": "emergency", "lifeguard": "medical (lifeguard)", "minfuel": "minimum fuel",
+                   "nordo": "radio failure", "unlawful": "unlawful interference", "downed": "aircraft down"}
+ADSB_ALERT_HEADERS = ["Time", "Kind", "Hex", "Callsign", "Registration", "Type", "Squawk", "Altitude (ft)",
+                      "Speed (kt)", "Latitude", "Longitude", "Distance (mi)", "Details"]
+ADSB_HEARD_HEADERS = ["Time", "Channel", "Frequency", "Audio File", "Said", "Callsign", "Hex", "Registration",
+                      "Type", "Altitude (ft)", "Speed (kt)", "Latitude", "Longitude", "Distance (mi)", "Match"]
+AIRBAND_RANGES_MHZ = ((108.0, 137.0), (225.0, 400.0))
+
+# Radio names (telephony) of airlines and operators often heard in North America → ICAO prefix.
+AIRLINE_TELEPHONY = {
+    "delta": "DAL", "american": "AAL", "united": "UAL", "southwest": "SWA", "jetblue": "JBU",
+    "jet blue": "JBU", "alaska": "ASA", "spirit wings": "NKS", "spirit": "NKS", "frontier flight": "FFT",
+    "frontier": "FFT", "allegiant": "AAY", "hawaiian": "HAL", "sun country": "SCX", "moxy": "MXY",
+    "fedex": "FDX", "fed ex": "FDX", "ups": "UPS", "giant": "GTI", "kalitta": "CKS", "connie": "CKS",
+    "endeavor": "EDV", "envoy": "ENY", "brickyard": "RPA", "skywest": "SKW", "sky west": "SKW",
+    "piedmont": "PDT", "blue streak": "JIA", "air shuttle": "ASH", "lindbergh": "GJS", "horizon": "QXE",
+    "commutair": "UCA", "commute air": "UCA", "execjet": "EJA", "exec jet": "EJA", "flexjet": "LXJ",
+    "flex jet": "LXJ", "air canada": "ACA", "jazz": "JZA", "westjet": "WJA", "west jet": "WJA",
+    "reach": "RCH", "speedbird": "BAW", "lufthansa": "DLH", "air france": "AFR", "silver wings": "SIL",
+    "cactus": "AWE", "state express": "ABX", "abex": "ABX", "polar": "PAC", "atlas": "GTI",
+    "contour": "VTE", "mountain air": "MTN", "ameriflight": "AMF", "wheels up": "UPJ",
+}
+GA_PREFIXES = ("cessna", "piper", "cirrus", "beech", "beechcraft", "bonanza", "baron", "mooney", "diamond",
+               "citation", "king air", "lear", "learjet", "gulfstream", "challenger", "falcon", "pilatus",
+               "helicopter", "robinson", "bell", "airbus", "lifeguard", "medevac", "experimental", "skyhawk",
+               "cherokee", "archer", "warrior", "seminole", "november")
+PHONETIC = {"alpha": "A", "alfa": "A", "bravo": "B", "charlie": "C", "delta": "D", "echo": "E", "foxtrot": "F",
+            "golf": "G", "hotel": "H", "india": "I", "juliet": "J", "juliett": "J", "kilo": "K", "lima": "L",
+            "mike": "M", "november": "N", "oscar": "O", "papa": "P", "quebec": "Q", "romeo": "R",
+            "sierra": "S", "tango": "T", "uniform": "U", "victor": "V", "whiskey": "W", "xray": "X",
+            "x-ray": "X", "yankee": "Y", "zulu": "Z"}
+SPOKEN_DIGITS = {"zero": 0, "oh": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                 "seven": 7, "eight": 8, "nine": 9, "niner": 9, "ten": 10, "eleven": 11, "twelve": 12,
+                 "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+                 "eighteen": 18, "nineteen": 19}
+SPOKEN_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+               "eighty": 80, "ninety": 90}
+
+
+def is_airband(freq_text):
+    mhz = parse_mhz(str(freq_text or ""))
+    return mhz is not None and any(lo <= mhz <= hi for lo, hi in AIRBAND_RANGES_MHZ)
+
+
+def compass(lat1, lon1, lat2, lon2):
+    """8-point direction from point 1 to point 2."""
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lon2 - lon1)
+    angle = math.degrees(math.atan2(math.sin(dl) * math.cos(p2),
+                                    math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)))
+    return ("N", "NE", "E", "SE", "S", "SW", "W", "NW")[round((angle % 360) / 45) % 8]
+
+
+def _air_tokens(text):
+    return re.findall(r"[a-z0-9]+", str(text).lower().replace("x-ray", "xray"))
+
+
+def _spoken_number(tokens, i, limit=4):
+    """A flight number spoken from tokens[i]: ('1234', next index) or (None, i).
+    Handles digits (1234, 12 34), word digits (one two three four), pairs (twelve thirty-four),
+    'four seventy' (470) and 'four hundred' (400)."""
+    parts, j = [], i
+    while j < len(tokens) and len(parts) < limit:
+        t = tokens[j]
+        if t.isdigit() and len(t) <= 4:
+            parts.append(t)
+            j += 1
+        elif t in SPOKEN_TENS:
+            value = SPOKEN_TENS[t]
+            if j + 1 < len(tokens) and tokens[j + 1] in SPOKEN_DIGITS and SPOKEN_DIGITS[tokens[j + 1]] < 10:
+                value += SPOKEN_DIGITS[tokens[j + 1]]
+                j += 1
+            parts.append(str(value))
+            j += 1
+        elif t in SPOKEN_DIGITS:
+            parts.append(str(SPOKEN_DIGITS[t]))
+            j += 1
+        elif t == "hundred" and parts:
+            parts[-1] += "00"
+            j += 1
+        elif t == "thousand" and parts:
+            parts[-1] += "000"
+            j += 1
+        else:
+            break
+    number = "".join(parts)
+    return (number[:5], j) if number else (None, i)
+
+
+def spoken_callsigns(text):
+    """Callsigns said in a transcript: [{'said', 'kind': 'airline'|'registration'|'suffix', 'value'}].
+    airline → 'DAL1234'; registration → 'N123AB'; suffix → '45A' (the end of an N-number)."""
+    tokens = _air_tokens(text)
+    found, seen, i = [], set(), 0
+    names = sorted(AIRLINE_TELEPHONY, key=lambda n: -len(n.split()))
+    while i < len(tokens):
+        hit = None
+        for name in names:
+            words = name.split()
+            if tokens[i:i + len(words)] == words:
+                number, j = _spoken_number(tokens, i + len(words))
+                if number:
+                    hit = ({"said": " ".join(tokens[i:j]), "kind": "airline",
+                            "value": AIRLINE_TELEPHONY[name] + number.lstrip("0")}, j)
+                break
+        if hit is None and re.fullmatch(r"n[1-9][0-9a-z]{1,4}", tokens[i]):            # written "N123AB"
+            hit = ({"said": tokens[i], "kind": "registration", "value": tokens[i].upper()}, i + 1)
+        if hit is None:
+            for prefix in GA_PREFIXES:
+                words = prefix.split()
+                if tokens[i:i + len(words)] != words:
+                    continue
+                chars, j = [], i + len(words)
+                while j < len(tokens) and len(chars) < 6:
+                    t = tokens[j]
+                    if re.fullmatch(r"[0-9][0-9a-z]{0,4}", t):          # "4", "123", "123ab"
+                        chars.append(t.upper())
+                    elif t in SPOKEN_DIGITS and SPOKEN_DIGITS[t] < 10:
+                        chars.append(str(SPOKEN_DIGITS[t]))
+                    elif t in PHONETIC:
+                        chars.append(PHONETIC[t])
+                    elif len(t) == 1 and t.isalpha() and chars:
+                        chars.append(t.upper())
+                    else:
+                        break
+                    j += 1
+                code = "".join(chars)
+                if prefix == "november" and re.fullmatch(r"[1-9][0-9A-Z]{0,4}", code or ""):
+                    hit = ({"said": " ".join(tokens[i:j]), "kind": "registration", "value": "N" + code}, j)
+                elif len(code) >= 3 and re.fullmatch(r"[0-9A-Z]+", code) and any(c.isdigit() for c in code):
+                    hit = ({"said": " ".join(tokens[i:j]), "kind": "suffix", "value": code[-5:]}, j)
+                break
+        if hit:
+            entry, i = hit
+            key = (entry["kind"], entry["value"])
+            if key not in seen:
+                seen.add(key)
+                found.append(entry)
+        else:
+            i += 1
+    return found
+
+
+def aircraft_name(a):
+    """'DAL1234 N123DL A321' (whatever is known)."""
+    return " ".join(p for p in (a.get("flight", ""), a.get("r", ""), a.get("t", "")) if p) or a.get("hex", "?").upper()
+
+
+def parse_aircraft_json(data, received=None):
+    """[(time, aircraft dict)] from readsb/dump1090 aircraft.json (bytes or str)."""
+    doc = json.loads(data)
+    now = float(doc.get("now") or received or time.time())
+    out = []
+    for a in doc.get("aircraft") or []:
+        if not isinstance(a, dict) or not a.get("hex"):
+            continue
+        a = dict(a)
+        a["hex"] = str(a["hex"]).lower().lstrip("~")
+        a["flight"] = str(a.get("flight") or "").strip().upper()
+        a["r"] = str(a.get("r") or "").strip().upper()
+        a["t"] = str(a.get("t") or "").strip().upper()
+        a["squawk"] = str(a.get("squawk") or "")
+        seen = float(a.get("seen") or 0)
+        out.append((now - seen, a))
+    return out
+
+
+def match_callsigns(said, candidates):
+    """For each spoken callsign, the aircraft it is: [(spoken, aircraft or None, confidence)].
+    `candidates` are aircraft in range around the time of the call."""
+    results = []
+    for s in said:
+        if s["kind"] == "airline":
+            hits = [a for a in candidates if a.get("flight", "").replace(" ", "") == s["value"]
+                    or re.sub(r"^([A-Z]{3})0+", r"\1", a.get("flight", "")) == s["value"]]
+            results.append((s, hits[0] if hits else None, "callsign" if hits else "not seen by ADS-B"))
+        elif s["kind"] == "registration":
+            hits = [a for a in candidates if s["value"] in (a.get("r", ""), a.get("flight", ""))]
+            results.append((s, hits[0] if hits else None, "registration" if hits else "not seen by ADS-B"))
+        else:
+            hits = [a for a in candidates
+                    if any(x.startswith("N") and x.endswith(s["value"]) for x in (a.get("r", ""), a.get("flight", "")))]
+            if len(hits) == 1:
+                results.append((s, hits[0], "end of registration (only match in range)"))
+            elif hits:
+                results.append((s, None, f"{len(hits)} aircraft in range end in {s['value']}"))
+    return results
+
+
+def csv_append(path, headers, row):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fresh = not path.exists() or path.stat().st_size == 0
+    with path.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if fresh:
+            w.writerow(headers)
+        w.writerow(row)
+
+
+def read_csv_rows(path, headers):
+    try:
+        with path.open(newline="", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            if next(reader, None) != headers:
+                return []
+            return [r for r in reader if len(r) == len(headers)]
+    except (OSError, csv.Error, UnicodeDecodeError):
+        return []
+
+
+def adsb_alert_path(day):
+    return ADSB_DIR / f"adsb_alerts_{day}.csv"
+
+
+def adsb_heard_path(day):
+    return ADSB_DIR / f"aircraft_heard_{day}.csv"
+
+
+def heard_by_file(day):
+    """{audio file: [rows]} of the aircraft matched in that day's transcripts."""
+    out = defaultdict(list)
+    for r in read_csv_rows(adsb_heard_path(day), ADSB_HEARD_HEADERS):
+        out[r[3]].append(r)
+    return out
+
+
+def heard_line(r):
+    """One line for a matched callsign under a transcript."""
+    said, callsign, reg, typ, alt, speed, dist, how = r[4], r[5], r[7], r[8], r[9], r[10], r[13], r[14]
+    if not r[6]:
+        return f"✈ “{said}” = {callsign or '?'} ({how})"
+    bits = [p for p in (callsign, reg, typ) if p]
+    if alt:
+        bits.append("on the ground" if alt == "ground" else f"{int(float(alt)):,} ft")
+    if speed:
+        bits.append(f"{float(speed):.0f} kt")
+    if dist:
+        bits.append(dist)
+    return f"✈ “{said}” = " + " • ".join(bits)
+
+
+class AdsbFeed(QObject):
+    """Reads aircraft.json every few seconds; alerts; keeps an hour of positions for matching."""
+    updated = pyqtSignal()
+    alerted = pyqtSignal(str)
+    fetched = pyqtSignal(object)            # from the HTTP worker thread
+
+    def __init__(self, monitor):
+        super().__init__(monitor)
+        self.monitor = monitor
+        self.tracks = {}                     # hex → deque[(time, aircraft)]
+        self.current = {}                    # hex → (time, aircraft) of the latest read
+        self.receiver = None                 # (lat, lon) from receiver.json
+        self.status, self.error, self.last_read = "off", "", 0.0
+        self.source_used = ""
+        self.alerted_at = {}                 # (hex, kind) → time of the last alert
+        self.busy = False
+        self.fetched.connect(self._ingest_result)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.poll)
+        self.apply_settings()
+
+    # -- settings ----------------------------------------------------------------
+    def setting(self, key, default=""):
+        return str(self.monitor.settings.value(f"adsb/{key}", default) or "")
+
+    def flag(self, key, default=True):
+        return self.setting(key, "true" if default else "false") == "true"
+
+    def source(self):
+        """('file', path) or ('url', address) or (None, '')."""
+        chosen = self.setting("source", "auto").strip()
+        if chosen and chosen != "auto":
+            return ("url", chosen) if chosen.startswith(("http://", "https://")) else ("file", chosen)
+        for path in ADSB_SOURCES:
+            if Path(path).is_file():
+                return "file", path
+        return ("url", ADSB_URL) if self.setting("enabled", "auto") == "true" else (None, "")
+
+    def enabled(self):
+        value = self.setting("enabled", "auto")
+        if value == "auto":
+            return any(Path(p).is_file() for p in ADSB_SOURCES)
+        return value == "true"
+
+    def apply_settings(self):
+        if self.enabled():
+            self.timer.start(max(2, int(self.setting("interval", "5") or 5)) * 1000)
+            QTimer.singleShot(0, self.poll)
+        else:
+            self.timer.stop()
+            self.status = "off"
+            self.updated.emit()
+
+    # -- reading ---------------------------------------------------------------------
+    def poll(self):
+        kind, where = self.source()
+        if kind is None:
+            self.status, self.error = "no source", "No aircraft.json found (is readsb running?)"
+            self.updated.emit()
+            return
+        self.source_used = where
+        if kind == "file":
+            try:
+                data = Path(where).read_bytes()
+                receiver = Path(where).with_name("receiver.json")
+                rec = receiver.read_bytes() if self.receiver is None and receiver.is_file() else None
+            except OSError as exc:
+                self._ingest_result({"error": str(exc)})
+                return
+            self._ingest_result({"data": data, "receiver": rec})
+        elif not self.busy:
+            self.busy = True
+            threading.Thread(target=self._fetch, args=(where,), daemon=True).start()
+
+    def _fetch(self, url):
+        try:
+            with urllib.request.urlopen(url, timeout=4) as r:
+                data = r.read(20_000_000)
+            rec = None
+            if self.receiver is None:
+                try:
+                    with urllib.request.urlopen(url.rsplit("/", 1)[0] + "/receiver.json", timeout=4) as r:
+                        rec = r.read(100_000)
+                except Exception:
+                    rec = None
+            self.fetched.emit({"data": data, "receiver": rec})
+        except Exception as exc:
+            self.fetched.emit({"error": str(exc)})
+
+    def _ingest_result(self, result):
+        self.busy = False
+        if "error" in result:
+            self.status, self.error = "error", result["error"]
+            self.updated.emit()
+            return
+        try:
+            self.ingest(result["data"], result.get("receiver"))
+        except (ValueError, TypeError, KeyError) as exc:
+            self.status, self.error = "error", f"Unreadable aircraft.json: {exc}"
+            self.updated.emit()
+
+    def ingest(self, data, receiver=None, now=None):
+        now = now or time.time()
+        if receiver:
+            try:
+                doc = json.loads(receiver)
+                if doc.get("lat") is not None and doc.get("lon") is not None:
+                    self.receiver = (float(doc["lat"]), float(doc["lon"]))
+            except (ValueError, TypeError):
+                pass
+        aircraft = parse_aircraft_json(data, now)
+        self.current = {}
+        for seen, a in aircraft:
+            if now - seen > 60:
+                continue                     # gone: readsb keeps aircraft for a while after the last message
+            self.current[a["hex"]] = (seen, a)
+            track = self.tracks.setdefault(a["hex"], deque(maxlen=800))
+            if not track or seen > track[-1][0]:
+                track.append((seen, a))
+        cutoff = now - ADSB_HISTORY_S
+        for hex_id in [h for h, t in self.tracks.items() if not t or t[-1][0] < cutoff]:
+            del self.tracks[hex_id]
+        self.status, self.error, self.last_read = "ok", "", now
+        self.check_alerts(now)
+        self.updated.emit()
+
+    # -- position helpers ---------------------------------------------------------------
+    def home(self):
+        if self.receiver:
+            return self.receiver
+        gps = getattr(self.monitor, "gps", None)
+        if gps is not None:
+            return gps.position() or gps.scanner_location
+        return None
+
+    def where(self, a):
+        """'12 mi NE' from the receiver, or ''."""
+        home = self.home()
+        if home is None or a.get("lat") is None or a.get("lon") is None:
+            return ""
+        miles = miles_between(home[0], home[1], float(a["lat"]), float(a["lon"]))
+        return f"{miles:.0f} mi {compass(home[0], home[1], float(a['lat']), float(a['lon']))}"
+
+    def distance(self, a):
+        home = self.home()
+        if home is None or a.get("lat") is None or a.get("lon") is None:
+            return None
+        return miles_between(home[0], home[1], float(a["lat"]), float(a["lon"]))
+
+    # -- alerts ---------------------------------------------------------------------------------
+    def watch_list(self):
+        return [w.strip().upper() for w in self.setting("watch").replace(",", "\n").splitlines() if w.strip()]
+
+    def watched(self, a, entries):
+        names = {a["hex"].upper(), a.get("flight", ""), a.get("r", "")}
+        for e in entries:
+            if e.endswith("*") and any(n.startswith(e[:-1]) for n in names if n):
+                return e
+            if e in names:
+                return e
+        return None
+
+    def check_alerts(self, now):
+        emergencies = self.flag("emergency_alerts", True)
+        within = float(self.setting("alert_miles", "0") or 0)
+        entries = self.watch_list()
+        for hex_id, (_seen, a) in self.current.items():
+            reasons = []
+            if emergencies:
+                if a["squawk"] in EMERGENCY_SQUAWKS:
+                    reasons.append(("squawk " + a["squawk"], f"Squawk {a['squawk']} ({EMERGENCY_SQUAWKS[a['squawk']]})", 1800))
+                elif str(a.get("emergency") or "none") in EMERGENCY_FIELD:
+                    what = EMERGENCY_FIELD[str(a["emergency"])]
+                    reasons.append(("emergency " + str(a["emergency"]), f"Emergency: {what}", 1800))
+            entry = self.watched(a, entries) if entries else None
+            if entry:
+                reasons.append(("watch " + entry, f"Watched aircraft ({entry})", 7200))
+            if not reasons:
+                continue
+            dist = self.distance(a)
+            if within and dist is not None and dist > within and not entry:
+                continue
+            for key, title, cooldown in reasons:
+                if now - self.alerted_at.get((hex_id, key), -1e12) < cooldown:
+                    continue
+                self.alerted_at[(hex_id, key)] = now
+                alt = a.get("alt_baro")
+                bits = [aircraft_name(a)]
+                if alt not in (None, ""):
+                    bits.append("on the ground" if alt == "ground" else f"{int(alt):,} ft")
+                if a.get("gs") is not None:
+                    bits.append(f"{float(a['gs']):.0f} kt")
+                if self.where(a):
+                    bits.append(self.where(a))
+                text = " • ".join(bits)
+                self.monitor.notify(title, text, "aircraft")
+                self.alerted.emit(f"{title}: {text}")
+                stamp = datetime.fromtimestamp(now)
+                try:
+                    csv_append(adsb_alert_path(stamp.strftime("%Y-%m-%d")), ADSB_ALERT_HEADERS, [
+                        stamp.strftime("%Y-%m-%d %H:%M:%S"), title, hex_id, a.get("flight", ""), a.get("r", ""),
+                        a.get("t", ""), a["squawk"], "" if alt is None else alt, a.get("gs", ""),
+                        a.get("lat", ""), a.get("lon", ""), "" if dist is None else f"{dist:.1f}", key])
+                except OSError:
+                    pass
+
+    # -- transcripts ------------------------------------------------------------------------------
+    def candidates(self, when, length=0.0):
+        """Aircraft seen within the match window of a call starting at `when` (epoch seconds):
+        the position nearest the call for each."""
+        lo, hi = when - ADSB_MATCH_WINDOW_S, when + length + ADSB_MATCH_WINDOW_S
+        out = []
+        for track in self.tracks.values():
+            near = [(abs(t - when), a) for t, a in track if lo <= t <= hi]
+            if near:
+                out.append(min(near, key=lambda x: x[0])[1])
+        return out
+
+    def transcript_added(self, row):
+        """Match the callsigns in a new transcript (live only: positions are kept for an hour)."""
+        if not self.enabled() or not self.flag("match", True) or not row[8]:
+            return []
+        frequency = ""
+        for audio in read_audio_index(audio_index_path(datetime.strptime(row[0][:10], "%Y-%m-%d"))):
+            if audio[-1] == row[7]:
+                frequency = audio[6]
+                break
+        if self.flag("airband_only", True) and not is_airband(frequency):
+            return []
+        said = spoken_callsigns(row[8])
+        if not said:
+            return []
+        try:
+            when = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S").timestamp()
+            length = float(row[6] or 0)
+        except ValueError:
+            return []
+        if time.time() - when > ADSB_HISTORY_S - ADSB_MATCH_WINDOW_S:
+            return []                         # too long ago: positions from then are gone
+        rows = []
+        for s, a, how in match_callsigns(said, self.candidates(when, length)):
+            a = a or {}
+            dist = self.distance(a) if a else None
+            rows.append([row[0], row[3], frequency, row[7], s["said"], a.get("flight") or s["value"],
+                         a.get("hex", ""), a.get("r", ""), a.get("t", ""),
+                         "" if a.get("alt_baro") is None else a.get("alt_baro"), a.get("gs", ""),
+                         a.get("lat", ""), a.get("lon", ""), self.where(a) if a else "", how])
+        for r in rows:
+            try:
+                csv_append(adsb_heard_path(row[0][:10]), ADSB_HEARD_HEADERS, r)
+            except OSError:
+                pass
+        return rows
+
+
+class AircraftWindow(QWidget):
+    """Tools → Aircraft (ADS-B)…"""
+    NOW_COLUMNS = ["Callsign", "Registration", "Type", "Squawk", "Altitude (ft)", "Speed (kt)", "Where", "Seen"]
+
+    def __init__(self, monitor):
+        super().__init__(monitor)
+        analysis_window(self, monitor, "Aircraft (ADS-B)", "adsb/geometry", (1000, 720))
+        self.monitor = monitor
+        self.feed = monitor.adsb
+        s = monitor.settings
+        layout = QVBoxLayout(self)
+        intro = make_label("Aircraft from readsb (or dump1090) on this computer: alerts on emergency squawks and "
+                           "watched aircraft, and the aircraft matched to callsigns heard in airband transcripts.")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self.status = make_label("")
+        self.status.setWordWrap(True)
+        set_css(self.status, "font-weight:600;color:#8bd6f2;")
+        layout.addWidget(self.status)
+        row = QHBoxLayout()
+        self.enabled = QComboBox()
+        for label, value in (("On when readsb is found", "auto"), ("On", "true"), ("Off", "false")):
+            self.enabled.addItem(label, value)
+        self.enabled.setCurrentIndex(max(0, self.enabled.findData(self.feed.setting("enabled", "auto"))))
+        self.enabled.currentIndexChanged.connect(self.save)
+        row.addWidget(make_label("ADS-B"))
+        row.addWidget(self.enabled)
+        row.addWidget(make_label("Source"))
+        self.source = QLineEdit(self.feed.setting("source", "auto"))
+        self.source.setPlaceholderText("auto, a path to aircraft.json, or http://…/tar1090/data/aircraft.json")
+        self.source.setToolTip("auto finds /run/readsb/aircraft.json (and the dump1090 locations). "
+                               f"tar1090 over the network: {ADSB_URL}")
+        self.source.editingFinished.connect(self.save)
+        row.addWidget(self.source, 1)
+        row.addWidget(make_label("every"))
+        self.interval = QSpinBox()
+        self.interval.setRange(2, 60)
+        self.interval.setSuffix(" s")
+        self.interval.setValue(int(self.feed.setting("interval", "5") or 5))
+        self.interval.valueChanged.connect(self.save)
+        row.addWidget(self.interval)
+        layout.addLayout(row)
+        opts = QHBoxLayout()
+        self.emergency = QCheckBox("Alert on emergency squawks (7500, 7600, 7700)")
+        self.emergency.setChecked(self.feed.flag("emergency_alerts", True))
+        self.emergency.toggled.connect(self.save)
+        opts.addWidget(self.emergency)
+        opts.addWidget(make_label("only within"))
+        self.miles = QSpinBox()
+        self.miles.setRange(0, 500)
+        self.miles.setSuffix(" mi")
+        self.miles.setSpecialValueText("any distance")
+        self.miles.setValue(int(float(self.feed.setting("alert_miles", "0") or 0)))
+        self.miles.valueChanged.connect(self.save)
+        opts.addWidget(self.miles)
+        self.match = QCheckBox("Match callsigns in transcripts")
+        self.match.setChecked(self.feed.flag("match", True))
+        self.match.toggled.connect(self.save)
+        opts.addWidget(self.match)
+        self.airband = QCheckBox("airband channels only")
+        self.airband.setToolTip("Only calls on 108–137 MHz and 225–400 MHz")
+        self.airband.setChecked(self.feed.flag("airband_only", True))
+        self.airband.toggled.connect(self.save)
+        opts.addWidget(self.airband)
+        opts.addStretch(1)
+        layout.addLayout(opts)
+        self.tabs = QTabWidget()
+        self.now_table = unit_table(self.NOW_COLUMNS)
+        self.tabs.addTab(self.now_table, "Aircraft now")
+        self.heard_table = unit_table(["Time", "Channel", "Said", "Callsign", "Registration", "Type",
+                                       "Altitude (ft)", "Speed (kt)", "Where", "Match"])
+        stretch_last(self.heard_table)
+        self.tabs.addTab(self.heard_table, "Heard on the radio today")
+        self.alerts_table = unit_table(["Time", "Alert", "Callsign", "Registration", "Type", "Squawk",
+                                        "Altitude (ft)", "Distance (mi)"])
+        self.tabs.addTab(self.alerts_table, "Alerts today")
+        watch = QWidget()
+        wl = QVBoxLayout(watch)
+        note = make_label("One per line: a callsign (DAL1234), a registration (N123AB), an ICAO hex code (a1b2c3), "
+                          "or a start with * (N911*, RCH*). You get an alert when one is seen, at most every two hours.")
+        note.setWordWrap(True)
+        wl.addWidget(note)
+        self.watch = QTextEdit()
+        self.watch.setAcceptRichText(False)
+        self.watch.setPlainText(self.feed.setting("watch"))
+        wl.addWidget(self.watch, 1)
+        save = QPushButton("SAVE WATCH LIST")
+        save.clicked.connect(self.save_watch)
+        wl.addWidget(save)
+        self.tabs.addTab(watch, "Watch list")
+        layout.addWidget(self.tabs, 1)
+        hint = make_label("Callsigns are matched while the positions from the time of the call are still kept "
+                          "(one hour). Airband speech is fast, so check matches against what you hear.")
+        hint.setWordWrap(True)
+        set_css(hint, "color:#a5bdd2;")
+        layout.addWidget(hint)
+        self.feed.updated.connect(self.refresh)
+
+    def open(self):
+        self.refresh()
+        restore_window(self, self.monitor)
+
+    def save_settings(self, settings):
+        if self.geometry_restored:
+            settings.setValue(self.geometry_key, self.saveGeometry())
+
+    def save(self, *_):
+        s = self.monitor.settings
+        s.setValue("adsb/enabled", self.enabled.currentData() or "auto")
+        s.setValue("adsb/source", self.source.text().strip() or "auto")
+        s.setValue("adsb/interval", self.interval.value())
+        s.setValue("adsb/emergency_alerts", "true" if self.emergency.isChecked() else "false")
+        s.setValue("adsb/alert_miles", self.miles.value())
+        s.setValue("adsb/match", "true" if self.match.isChecked() else "false")
+        s.setValue("adsb/airband_only", "true" if self.airband.isChecked() else "false")
+        self.feed.apply_settings()
+
+    def save_watch(self):
+        self.monitor.settings.setValue("adsb/watch", self.watch.toPlainText().strip())
+        set_text(self.status, f"Watch list saved ({len(self.feed.watch_list())} entries).")
+
+    def refresh(self, *_):
+        f = self.feed
+        if f.status == "ok":
+            age = time.time() - f.last_read
+            home = "receiver position from readsb" if f.receiver else ("distances from GPS/scanner location"
+                                                                        if f.home() else "no position for distances")
+            set_text(self.status, f"Reading {f.source_used} • {len(f.current)} aircraft • "
+                     f"updated {age:.0f} s ago • {home}")
+        elif f.status == "off":
+            set_text(self.status, "ADS-B is off.")
+        else:
+            set_text(self.status, f"ADS-B: {f.error}")
+        rows = []
+        for _hex, (seen, a) in sorted(f.current.items(), key=lambda kv: (f.distance(kv[1][1]) or 1e9)):
+            alt = a.get("alt_baro")
+            rows.append([a.get("flight", "") or a["hex"].upper(), a.get("r", ""), a.get("t", ""), a["squawk"],
+                         "ground" if alt == "ground" else ("" if alt is None else f"{int(alt):,}"),
+                         "" if a.get("gs") is None else f"{float(a['gs']):.0f}", f.where(a),
+                         f"{max(0, time.time() - seen):.0f} s"])
+        fill_table(self.now_table, rows)
+        day = datetime.now().strftime("%Y-%m-%d")
+        heard = read_csv_rows(adsb_heard_path(day), ADSB_HEARD_HEADERS)
+        fill_table(self.heard_table, [[r[0][11:], r[1], r[4], r[5], r[7], r[8], r[9], r[10], r[13], r[14]]
+                                      for r in reversed(heard)])
+        alerts = read_csv_rows(adsb_alert_path(day), ADSB_ALERT_HEADERS)
+        fill_table(self.alerts_table, [[r[0][11:], r[1], r[3], r[4], r[5], r[6], r[7], r[11]]
+                                       for r in reversed(alerts)])
+
+
 class Monitor(QMainWindow):
     # Re-emits every reply from whichever serial thread is current.
     scanner_output = pyqtSignal(str)
@@ -18408,6 +19142,10 @@ class Monitor(QMainWindow):
         self.last_heard = None                # System/Department/Channel last received (Ten Codes)
         self.ten_codes = TenCodeBook(self)
         self.ten_codes_window = None
+        self.adsb = AdsbFeed(self)
+        self.aircraft_window = None
+        self.menu_parts = []              # a long scanner menu arrives in parts (v1.1.59)
+        self.menu_parts_timer = None
         self.report_saver = ReportSaver(self)
         self.report_saver.saved.connect(lambda text: self.statusBar().showMessage(text, 10000))
         self.daily_report_window = None
@@ -18576,9 +19314,38 @@ class Monitor(QMainWindow):
         self.console.output_xml("AST", xml)
 
     def handle_menu_xml(self, xml):
+        self.console.output_xml("MSI", xml)
+        number, last = menu_footer(xml)
+        parts = getattr(self, "menu_parts", None) or []
+        if number <= 1:
+            parts = []                      # a new menu starts
+        parts.append(xml)
+        if not last:
+            # More parts follow straight away; if one never comes, show what arrived.
+            self.menu_parts = parts
+            if getattr(self, "menu_parts_timer", None) is None:
+                self.menu_parts_timer = QTimer(self)
+                self.menu_parts_timer.setSingleShot(True)
+                self.menu_parts_timer.timeout.connect(self.flush_menu_parts)
+            self.menu_parts_timer.start(1500)
+            return
+        self.menu_parts = []
+        if getattr(self, "menu_parts_timer", None) is not None:
+            self.menu_parts_timer.stop()
+        self.dispatch_menu(parts)
+
+    def flush_menu_parts(self):
+        parts, self.menu_parts = getattr(self, "menu_parts", None) or [], []
+        if parts:
+            self.dispatch_menu(parts)
+
+    def dispatch_menu(self, parts):
+        try:
+            xml = parts[0] if len(parts) == 1 else merge_menu_parts(parts)
+        except ET.ParseError:
+            xml = parts[-1]
         self.close_call.handle_xml(xml)
         self.scanner_menu.handle_xml(xml)
-        self.console.output_xml("MSI", xml)
 
     def open_discovery(self, load=False):
         self.discovery.open()
@@ -18910,6 +19677,7 @@ class Monitor(QMainWindow):
         tools_menu.addAction("GPS…", lambda: GpsSettingsDialog(self).exec())
         tools_menu.addAction("Places and Map…", lambda: self.open_analysis("places_window", PlacesWindow))
         tools_menu.addAction("Ten Codes…", lambda: self.open_analysis("ten_codes_window", TenCodesWindow))
+        tools_menu.addAction("Aircraft (ADS-B)…", lambda: self.open_analysis("aircraft_window", AircraftWindow))
         tools_menu.addSeparator()
         tools_menu.addAction("Antenna Test…",
                              lambda: self.open_analysis("antenna_window", AntennaTestWindow))
@@ -19874,6 +20642,11 @@ class Monitor(QMainWindow):
         look for a call sign that names the radio."""
         self.unit_suggester.transcript_added(row)
         self.places_finder.transcript_added(row)
+        try:
+            if self.adsb.transcript_added(row) and self.transcription_window is not None:
+                self.transcription_window.heard_changed(row)
+        except Exception as exc:              # aircraft matching must never stop transcription
+            self.statusBar().showMessage(f"Aircraft matching: {exc}", 5000)
         text = row[8]
         if not text:
             return
@@ -21597,7 +22370,8 @@ class Monitor(QMainWindow):
         for window in (self.incidents_window, self.suggestions_window, self.activity_window,
                        self.search_window, self.fleet_window, self.places_window,
                        self.antenna_window, self.close_call_window, self.modes_window,
-                       self.screc_window, self.ten_codes_window, self.daily_report_window):
+                       self.screc_window, self.ten_codes_window, self.daily_report_window,
+                       self.aircraft_window):
             if window is not None:
                 window.save_settings(self.settings)
         if self.transcription_window is not None:

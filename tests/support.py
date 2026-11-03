@@ -38,6 +38,7 @@ class Settings(dict):
 
     def __init__(self, *args):
         super().__init__()
+        self["adsb/enabled"] = "false"      # never read this PC's real readsb data in tests
 
     def value(self, key, default=None, **kwargs):
         return self.get(key, default)

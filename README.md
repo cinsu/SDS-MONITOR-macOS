@@ -14,6 +14,7 @@ It shows what the scanner is receiving, keeps a searchable reception history, re
 - **Audio:** one MP3 per transmission from your PC's audio input, with metadata, and offline speech-to-text transcription (faster-whisper).
 - **Analysis:** incidents with one-line headlines and timelines, daily reports (window, PDF or HTML), Activity Watch for unusual activity, the scanner's Analyze functions (site health, channel load, unknown talkgroup and unit finder), and an antenna test.
 - **Ten codes:** look-up by agency and location, decoded in transcripts (ships with the APCO 1974 list; add your own lists).
+- **Aircraft (ADS-B):** with readsb or dump1090 on the same PC, alerts on emergency squawks and watched aircraft, and matches callsigns heard in airband transcripts to the aircraft in range.
 - **Places and GPS:** keeps the scanner's location updated from a GPS receiver or your phone, and maps the places mentioned in transcripts (OpenStreetMap).
 - **Extras:** a USB macro keypad, themes (light, dark, night red, accent colours, text size) and a built-in update check.
 

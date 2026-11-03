@@ -116,6 +116,8 @@ def menu_actions(menu, path=""):
 def main():
     spec.loader.exec_module(mon)
     assert str(mon.DATA_DIR).startswith(HOME)
+    from PyQt6.QtCore import QSettings
+    QSettings("SDS100Monitor", "Monitor110").setValue("adsb/enabled", "false")   # not this PC's readsb
     window = mon.Monitor()
     window.show()
     pump(200)
