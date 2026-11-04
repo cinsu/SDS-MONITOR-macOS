@@ -1,12 +1,12 @@
 # SDS100 Monitor User Manual
 
-Version 1.1.63 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
+Version 1.1.65 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
 
 Use the outline button (☰) at the top right of this file to jump to a chapter.
 
 ## About this manual
 
-This manual describes **SDS100 Monitor version 1.1.63**, a Linux program for monitoring and controlling a Uniden SDS100 scanner from a PC over its USB cable. It runs on desktop Linux PCs and on the Raspberry Pi (chapter 25).
+This manual describes **SDS100 Monitor version 1.1.65**, a Linux program for monitoring and controlling a Uniden SDS100 scanner from a PC over its USB cable. It runs on desktop Linux PCs and on the Raspberry Pi (chapter 25).
 
 The chapters follow the program's menus and panels. Chapters 1 to 4 cover installing, connecting and the main window, and are worth reading first. The rest can be read as you need them.
 
@@ -91,7 +91,7 @@ SDS100 Monitor is installed as a Debian package, which apt sets up together with
 1. Download `sds100-monitor_<version>_all.deb` from the project's releases page, **github.com/jmlynchjr/SDS-MONITOR/releases**.
 2. In a terminal, in the folder you downloaded it to, run:
 
-   `sudo apt install ./sds100-monitor_1.1.63_all.deb`
+   `sudo apt install ./sds100-monitor_1.1.65_all.deb`
 
    (use the version you downloaded). apt also installs PyQt6 and pyserial if they're missing, and Qt Multimedia and `ffmpeg`, which PC audio capture needs (chapter 9).
 
@@ -229,7 +229,7 @@ Most tools open in their own window rather than as a panel: the waterfall, the S
 |---|---|
 | **History** | Browse CSV archives…, Activity Charts…, Unit ID Log…, Unit Profile…, Audio Recordings…, Search Everything… (Ctrl+F), Fleet Map…, Incidents…, Daily Report…, Unit Name Suggestions… |
 | **View** | Transcription…, the four panels, Detach/Dock for each panel, Scanner Screen…, Waterfall…, Scanner Tools…, Return all panels to tabs, Theme |
-| **Tools** | Analyze…, Scanner Menu…, Command Console…, Scanner Screen…, Scanner Tools…, Macro Keypad…, Activity Watch…, Phone Alerts…, Send Calls to Rdio Scanner… (chapter 9), GPS…, Places and Map…, Ten Codes…, Antenna Test…, Aircraft (ADS-B)… (chapter 26) |
+| **Tools** | Analyze…, Custom Search… (chapter 13), Antenna Test…; **Scanner ▸** Scanner Screen…, Scanner Menu…, Scanner Tools…, Command Console…; **Alerts ▸** Activity Watch…, Phone Alerts…, Send Calls to Rdio Scanner… (chapter 9); **Maps ▸** GPS…, Places and Map…, Aircraft (ADS-B)… (chapter 26); Ten Codes…; **Macro Keypad ▸** Macro Keypad… |
 | **Discovery** | Discovery Control…, Load Sessions, Start Last Session, Exit Discovery (Resume Scan) |
 | **Close Call** | Close Call Hits…, Mode: Off / Priority / Do Not Disturb, Check Current Mode, Start Close Call Only, Resume Scan, Close Call Bands…, Close Call Settings on Scanner… |
 | **Modes** | Weather and Tone-Out…, Weather (Weather Scan; Weather Alert: Alert Only, SAME 1–5, All FIPS), Start Tone-Out, Scanner Recordings…, Resume Scan (chapter 20) |
@@ -424,9 +424,9 @@ Right-click a key → **Keypress Protocol Diagnostic** opens an experimental too
 
 ### Scanner Screen
 
-**View → Scanner Screen…** (or **Tools → Scanner Screen…**) opens a live copy of the scanner's display in its own window.
+**View → Scanner Screen…** (or **Tools → Scanner → Scanner Screen…**) opens a live copy of the scanner's display in its own window.
 
-![Tools → Scanner Screen…: a live copy of the scanner's display, with its keys.](images/scanner-screen.png)
+![Tools → Scanner → Scanner Screen…: a live copy of the scanner's display, with its keys.](images/scanner-screen.png)
 
 
 - It shows every text line, large and small lines, highlighted and underlined characters, and the scanner's colour mode (colour, black or white background).
@@ -439,7 +439,7 @@ The window reopens at start-up if it was open when you quit. If the scanner refu
 
 ### Scanner Menu
 
-**Tools → Scanner Menu…** works the scanner's own menus as a list instead of with keys.
+**Tools → Scanner → Scanner Menu…** works the scanner's own menus as a list instead of with keys.
 
 - **Open a menu:** main menu, Settings, Select lists to monitor, Close Call, Close Call bands, Search options, Weather and Broadcast screen. It can also open the current system's, department's, site's or channel's options, or a custom search range or Tone-Out channel by number.
 - The window shows the menu title and all its items, with the current choice ticked. The scanner sends a long menu in parts (*Select lists to monitor* with many Favorites Lists, for example); the parts are joined, so every item is listed in the scanner's order. **SELECT** (or double-click) chooses an item, and the list shows the new value as soon as the scanner replies. Menus that ask for text or a number get an entry box showing the allowed length.
@@ -456,7 +456,7 @@ The window reopens at start-up if it was open when you quit. If the scanner refu
 
 ### Command Console
 
-**Tools → Command Console…** sends any remote command and shows the raw replies. It's mainly for checking what the scanner sends back.
+**Tools → Scanner → Command Console…** sends any remote command and shows the raw replies. It's mainly for checking what the scanner sends back.
 
 - Type a command and press **Enter**. ↑ and ↓ recall earlier commands; the last 100 are remembered.
 - A drop-down offers read-only commands such as `MDL`, `VER`, `GSI`, `GST`, `DTM`, `LCR`, `VOL`, `SQL`, `SVC`, `FQK`, `MSI` and `GLT`.
@@ -474,7 +474,7 @@ The window reopens at start-up if it was open when you quit. If the scanner refu
 
 ## 7. Scanner Tools
 
-**View → Scanner Tools…** (or **Tools → Scanner Tools…**) opens a window with five tabs.
+**View → Scanner Tools…** (or **Tools → Scanner → Scanner Tools…**) opens a window with five tabs.
 
 ### Lists
 
@@ -641,7 +641,7 @@ The same fields are also stored separately (START, END, DURATION, SYSTEM, DEPART
 
 ### Listening on your phone: Rdio Scanner
 
-**Tools → Send Calls to Rdio Scanner…** sends every recorded call to an **Rdio Scanner** server, a free (GPL v3) web app for scanner traffic. On your phone or in any browser it lists the calls with their system, talkgroup, channel and units, plays them live, lets you replay them and choose which talkgroups to hear, and can be added to the phone's home screen like an app.
+**Tools → Alerts → Send Calls to Rdio Scanner…** sends every recorded call to an **Rdio Scanner** server, a free (GPL v3) web app for scanner traffic. On your phone or in any browser it lists the calls with their system, talkgroup, channel and units, plays them live, lets you replay them and choose which talkgroups to hear, and can be added to the phone's home screen like an app.
 
 **Setting up Rdio Scanner** (once, on this PC or another one that is always on):
 
@@ -649,7 +649,7 @@ The same fields are also stored separately (START, END, DURATION, SYSTEM, DEPART
 2. Open its admin page (`http://127.0.0.1:3000/admin`), set the admin password, then:
    - **Options → Auto Populate** on, so systems and talkgroups are created as calls arrive;
    - **API Keys → new key**, allowed for all systems. Copy the key.
-3. In the Monitor, open **Tools → Send Calls to Rdio Scanner…**, tick **Send recorded calls to Rdio Scanner**, enter the **Server** (`http://127.0.0.1:3000` on the same PC) and the **API key**, and press **TEST CONNECTION**.
+3. In the Monitor, open **Tools → Alerts → Send Calls to Rdio Scanner…**, tick **Send recorded calls to Rdio Scanner**, enter the **Server** (`http://127.0.0.1:3000` on the same PC) and the **API key**, and press **TEST CONNECTION**.
 
 PC audio capture must be on (chapter 9): only recorded calls are sent.
 
@@ -868,7 +868,7 @@ Select an incident to see its timeline: time, +minutes, talkgroup, units, length
 
 ### Activity Watch
 
-**Tools → Activity Watch…** learns each talkgroup's normal traffic and alerts when something is different.
+**Tools → Alerts → Activity Watch…** learns each talkgroup's normal traffic and alerts when something is different.
 
 - **Unusual activity:** each talkgroup's or channel's calls in the last **15 minutes** (10, 15 or 30) are compared with its normal for that hour of the day, learned from the last **28 days** (14, 28, 56 or 90). Hours when the Monitor wasn't running don't count as quiet. **Sensitivity** Low, Medium or High alerts at 4×, 3× or 2× normal (and well above the usual variation), with at least **6 calls**. Each talkgroup alerts at most once per 30 minutes.
 - **First heard:** a talkgroup, channel or radio heard for the first time in your history.
@@ -887,7 +887,7 @@ Activity alerts use the Alerts settings (desktop notification, sound) and appear
 
 ### Phone Alerts
 
-**Tools → Phone Alerts…** (also **PHONE ALERTS…** in Activity Watch and Alerts) sends alerts to your phone as **push notifications**.
+**Tools → Alerts → Phone Alerts…** (also **PHONE ALERTS…** in Activity Watch and Alerts) sends alerts to your phone as **push notifications**.
 
 > [!NOTE]
 > Ordinary text messages aren't offered. The major US carriers have shut down or are phasing out their email-to-text gateways, and sending real SMS needs a registered business account. Push notifications arrive on the lock screen the same way.
@@ -911,7 +911,7 @@ Choose a service:
 > Settings, including tokens and passwords, are stored in the program's settings file in your home folder (`~/.config/SDS100Monitor/`).
 
 
-## 13. Discovery
+## 13. Discovery and Custom Search
 
 The SDS100's **Discovery** mode looks for active frequencies (Conventional Discovery) or talkgroups (Trunk Discovery) in a range or system. You set up sessions on the scanner; SDS100 Monitor starts them, follows what they find, and logs the hits.
 
@@ -960,6 +960,24 @@ Right-click a hit to:
 - copy it.
 
 Discovery hits are also logged in reception history (chapter 5), and work with PC audio capture, alerts and the unit ID log.
+
+### Custom Search
+
+**Tools → Custom Search…** runs the scanner's own search through its ten custom search banks, and lists every frequency it stops on.
+
+- **Search banks:** **LOAD BANKS** reads banks 0–9 from the scanner: name, lower and upper frequency, modulation and step. **State** shows each bank **On** or **Off**, and ▶ marks the bank being searched. The scanner only reports this while it is searching, so before that the state shows as ?. **EDIT RANGE ON SCANNER…** opens the selected bank's range in Scanner Menu (chapter 6); press **LOAD BANKS** afterwards to see the change.
+- **TURN BANK ON / OFF** presses the bank's number key on the scanner (bank 0 is key 0, bank 9 is key 9). The scanner only does this while it is searching, so start the search first; the State column changes with the next status report.
+- **START CUSTOM SEARCH** starts the search; **RESUME SCAN** goes back to scanning.
+- **Quick Search Hold:** type a frequency and press **QUICK SEARCH HOLD** to listen there; the scanner searches up or down from it when you turn its knob.
+- The line at the top shows whether the scanner is searching, and the frequency and bank it is on.
+
+**Hits** lists every frequency the search stopped on since the program started: when it was last and first heard, the bank, how many times, the air time, the strongest signal, and the talkgroup and units if it is digital. Search with the filter box.
+
+- **Double-click** a hit to listen there (Quick Search Hold).
+- **Right-click** a hit to avoid it temporarily or permanently (asks first), stop avoiding it, or copy its frequency.
+- **EXPORT CSV…** saves the list; **CLEAR LIST** empties it.
+
+Every hit is also saved in reception history, with the search mode as its system, so the history tools, alerts and recordings work for search hits too.
 
 ## 14. Close Call
 
@@ -1187,7 +1205,7 @@ On the **Compare** tab, tick the runs to compare.
 
 ### GPS: keeping the scanner's location updated
 
-The SDS100 takes a GPS receiver on its USB port, but SDS100 Monitor uses that port for the PC connection, so the two can't share it. Instead, **Tools → GPS…** reads a GPS connected to the PC, and sets the scanner's location as you move. Location-based scanning then keeps working while the scanner is connected, for example on a laptop in a vehicle.
+The SDS100 takes a GPS receiver on its USB port, but SDS100 Monitor uses that port for the PC connection, so the two can't share it. Instead, **Tools → Maps → GPS…** reads a GPS connected to the PC, and sets the scanner's location as you move. Location-based scanning then keeps working while the scanner is connected, for example on a laptop in a vehicle.
 
 **GPS sources:**
 
@@ -1208,9 +1226,9 @@ The **GPS** indicator in the status bar is green with a fix, amber while waiting
 
 ### Places and Map
 
-**Tools → Places and Map…** picks out places mentioned in **transcripts** (chapter 10), looks them up, and shows them on a map.
+**Tools → Maps → Places and Map…** picks out places mentioned in **transcripts** (chapter 10), looks them up, and shows them on a map.
 
-![Tools → Places and Map… (places and transcripts blurred).](images/places-table.png)
+![Tools → Maps → Places and Map… (places and transcripts blurred).](images/places-table.png)
 
 ![The map in the browser, with the places heard in the last 24 hours (the list is blurred).](images/places-map.png)
 
@@ -1252,7 +1270,7 @@ Places are saved in `~/SDS100Monitor/places/places_YYYY-MM-DD.csv`.
 
 ## 18. Macro keypad
 
-SDS100 Monitor can be controlled from a cheap USB **macro keypad**: the "MINI KeyBoard" pads with 1–16 keys and 0–3 knobs, which show up as `1189:8890` in `lsusb`. **Tools → Macro Keypad…** sets it up.
+SDS100 Monitor can be controlled from a cheap USB **macro keypad**: the "MINI KeyBoard" pads with 1–16 keys and 0–3 knobs, which show up as `1189:8890` in `lsusb`. **Tools → Macro Keypad → Macro Keypad…** sets it up.
 
 ### One-time setup
 
@@ -1517,7 +1535,7 @@ Use **Raspberry Pi OS 64-bit, with desktop** (Bookworm or newer), on a good micr
 
 3. Download `sds100-monitor_<version>_all.deb` on the Pi (from the releases page in its web browser), and install it in a terminal, in the folder you downloaded it to:
 
-   `sudo apt install ./sds100-monitor_1.1.63_all.deb`
+   `sudo apt install ./sds100-monitor_1.1.65_all.deb`
 
    The package is the same one as for a PC: it's pure Python, marked *all* for every processor.
 
@@ -1561,10 +1579,10 @@ The Pi's desktop isn't KDE, so the **System** theme follows Qt's own light or da
 
 If you also run an ADS-B receiver on the same PC, with **readsb** or **dump1090** and an RTL-SDR dongle, the Monitor can read its aircraft list. It then alerts on emergency squawks and watched aircraft, and works out which aircraft go with the callsigns heard in airband transcripts. It works alongside tar1090 and graphs1090, which you don't need to change.
 
-![Tools → Aircraft (ADS-B)…](images/aircraft.png)
+![Tools → Maps → Aircraft (ADS-B)…](images/aircraft.png)
 
 
-Open it with **Tools → Aircraft (ADS-B)…**.
+Open it with **Tools → Maps → Aircraft (ADS-B)…**.
 
 ### Setup
 
@@ -1582,7 +1600,7 @@ Distances are measured from the receiver position readsb reports (`receiver.json
 
 With **Alert on emergency squawks** ticked, you get a desktop alert when an aircraft squawks **7700** (emergency), **7600** (radio failure) or **7500** (hijack), or reports an emergency status. The alert gives its callsign, registration, type, altitude, speed and distance. **only within** limits alerts to a distance, in miles; 0 means any distance. Each aircraft and code is alerted at most once every 30 minutes.
 
-To get these on your phone, tick **Aircraft** in **Tools → Phone Alerts…** (chapter 12).
+To get these on your phone, tick **Aircraft** in **Tools → Alerts → Phone Alerts…** (chapter 12).
 
 ### Watch list
 
@@ -1725,7 +1743,7 @@ Existing CSV files are never rewritten in a new format. New features add new fil
 
 **The Scanner Menu doesn't respond after changing the lists to monitor.** The scanner is loading the lists, which can take several seconds. Wait, then press **REFRESH**.
 
-**Something looks wrong and you want to report it.** Open **Tools → Command Console…**, tick **XML replies** (and **Status polls** if it involves the status report), repeat what went wrong for a few seconds, and **SAVE…** the log. That file shows exactly what the scanner sent.
+**Something looks wrong and you want to report it.** Open **Tools → Scanner → Command Console…**, tick **XML replies** (and **Status polls** if it involves the status report), repeat what went wrong for a few seconds, and **SAVE…** the log. That file shows exactly what the scanner sent.
 
 ## Appendix: Commands that depend on the scanner's firmware
 

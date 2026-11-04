@@ -2,6 +2,21 @@
 
 Newest first. Versions before 1.1.47 were tested by hand on a real SDS100; from 1.1.47 on, every version also passes the automated tests.
 
+## v1.1.65: Custom Search banks 0–9, with On / Off
+
+- **Fixed (1.1.64):** Custom Search numbered the banks 1–10, so **TURN BANK ON / OFF** pressed the wrong number key. Banks are now 0–9, as on the scanner, and each bank's key is its own number.
+- **New State column** shows each bank **On** or **Off**, from the scanner's status report while it is searching (it doesn't report banks in other modes; until then the state shows as ?). The bank being searched is marked ▶. The unclear Off column is gone.
+- 2 new tests.
+
+## v1.1.64: Custom Search; a tidier Tools menu
+
+- **New: Tools → Custom Search…** for the scanner's own search:
+  - **Search banks** read from the scanner (name, range, modulation, step). **EDIT RANGE ON SCANNER…** opens the selected bank's range in Scanner Menu; **TURN BANK ON / OFF** presses its number key while searching.
+  - **START CUSTOM SEARCH** and **RESUME SCAN**, and **Quick Search Hold** from a frequency you type.
+  - **Hits:** every frequency the search stops on, with how often it was heard, air time, strongest signal, talkgroup and units. Double-click to listen there; right-click to avoid it (temporarily or permanently) or stop avoiding it. **EXPORT CSV…** saves the list. Hits are also kept in reception history, as before.
+- **Tools menu reorganized:** Analyze, Custom Search and Antenna Test at the top; **Scanner ▸** (Scanner Screen, Scanner Menu, Scanner Tools, Command Console), **Alerts ▸** (Activity Watch, Phone Alerts, Send Calls to Rdio Scanner) and **Maps ▸** (GPS, Places and Map, Aircraft); then Ten Codes and **Macro Keypad ▸**. The other menus are unchanged.
+- 8 new tests.
+
 ## v1.1.63: Calls to Rdio Scanner
 
 - **New: Tools → Send Calls to Rdio Scanner…** sends every recorded call (PC audio capture) to an [Rdio Scanner](https://github.com/chuot/rdio-scanner) server (free, GPL v3). Rdio Scanner plays them on your phone or in any browser, with the system, talkgroup, channel and units, and lets you replay calls and choose talkgroups. With a VPN such as Tailscale it works away from home too, on a home connection with a changing address.

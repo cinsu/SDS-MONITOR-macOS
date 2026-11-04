@@ -34,7 +34,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.1.63"
+VERSION = "1.1.65"
 
 # Qt 6.10's new PipeWire audio backend can crash the program while it lists audio devices at
 # start (segmentation fault inside PipeWire, seen with Qt 6.10.2 / PipeWire 1.6.2; it also prints
@@ -6366,7 +6366,7 @@ def parse_menu(xml):
 
 
 class ScannerMenuWindow(QWidget):
-    """Tools → Scanner Menu…: browse and change the scanner's menus from the PC."""
+    """Tools → Scanner → Scanner Menu…: browse and change the scanner's menus from the PC."""
 
     def __init__(self, monitor):
         super().__init__(monitor, Qt.WindowType.Window)
@@ -6736,7 +6736,7 @@ CONSOLE_CONFIRM = {
 
 
 class CommandConsole(QWidget):
-    """Tools → Command Console…: send any remote command and see the raw replies."""
+    """Tools → Scanner → Command Console…: send any remote command and see the raw replies."""
 
     def __init__(self, monitor):
         super().__init__(monitor, Qt.WindowType.Window)
@@ -7377,7 +7377,7 @@ KEYPAD_DEFAULTS = {
 
 
 class MacroKeypad(QObject):
-    """Owns the keypad listener, the bindings and the Tools → Macro Keypad window."""
+    """Owns the keypad listener, the bindings and the Tools → Macro Keypad → Macro Keypad window."""
     changed = pyqtSignal()
     actions_changed = pyqtSignal()            # what a key or knob does (v1.1.62)
     activity = pyqtSignal(str, str)           # target (or ""), combo
@@ -7503,7 +7503,7 @@ class MacroKeypad(QObject):
         if target is None:
             self.monitor.statusBar().showMessage(
                 f"Keypad: {keypad_combo_label(combo)} isn't assigned. "
-                "Tools → Macro Keypad… to set it up.", 4000)
+                "Tools → Macro Keypad → Macro Keypad… to set it up.", 4000)
             return
         action = self.bindings[target]["action"]
         if not action:
@@ -7654,7 +7654,7 @@ class MacroKeypad(QObject):
 
 
 class MacroKeypadWindow(QWidget):
-    """Tools → Macro Keypad…: choose what each keypad key does."""
+    """Tools → Macro Keypad → Macro Keypad…: choose what each keypad key does."""
 
     def __init__(self, keypad):
         super().__init__(keypad.monitor, Qt.WindowType.Window)
@@ -9825,7 +9825,7 @@ class IncidentsWindow(QWidget):
         export.clicked.connect(self.export)
         row.addWidget(export)
         self.map_btn = QPushButton("SHOW PLACES ON MAP")
-        self.map_btn.setToolTip("Places mentioned in this incident's calls (Tools → Places and Map…)")
+        self.map_btn.setToolTip("Places mentioned in this incident's calls (Tools → Maps → Places and Map…)")
         self.map_btn.clicked.connect(self.show_places)
         self.map_btn.setEnabled(False)
         row.addWidget(self.map_btn)
@@ -10344,7 +10344,7 @@ class IgnoreListDialog(QDialog):
 
 
 class ActivityWatchWindow(QWidget):
-    """Tools → Activity Watch…"""
+    """Tools → Alerts → Activity Watch…"""
     STATE_COLOURS = {"unusual": "#ff9e91", "busy": "#ffcf7a", "normal": "#c9d6e6",
                      "learning": "#8a96a6", "ignored": "#6c7684"}
 
@@ -10722,7 +10722,7 @@ class PhoneNotifier(QObject):
 
 
 class PhoneSettingsDialog(QDialog):
-    """Tools → Phone Alerts…"""
+    """Tools → Alerts → Phone Alerts…"""
 
     def __init__(self, monitor, parent=None):
         super().__init__(parent or monitor)
@@ -12188,7 +12188,7 @@ class GpsManager(QObject):
 
 
 class GpsSettingsDialog(QDialog):
-    """Tools → GPS…"""
+    """Tools → Maps → GPS…"""
 
     def __init__(self, monitor, parent=None):
         super().__init__(parent or monitor)
@@ -13006,7 +13006,7 @@ def open_in_browser(url):
 
 
 class PlacesWindow(QWidget):
-    """Tools → Places and Map…"""
+    """Tools → Maps → Places and Map…"""
     COLUMNS = ["Time", "Place heard", "Found as", "Status", "Channel", "Units", "Transcript"]
 
     def __init__(self, monitor):
@@ -15126,7 +15126,7 @@ class AntennaTestWindow(QWidget):
 #
 # The spec has no command for the Close Call mode itself (Off / Priority /
 # Do Not Disturb), so it is set through the scanner's own Close Call menu
-# (MNU,CC → MSI → MSV), the same commands Tools → Scanner Menu uses. Items are
+# (MNU,CC → MSI → MSV), the same commands Tools → Scanner → Scanner Menu uses. Items are
 # picked by what the menu calls them, never by position, and if the menu doesn't
 # look as expected the job stops there and the Scanner Menu window opens on it.
 #
@@ -16304,7 +16304,7 @@ class ScannerModesWindow(QWidget):
                                     "#a87d15")
         row.addWidget(self.hold_btn)
         row.addWidget(self.button("CHANNEL SETTINGS ON SCANNER…", "Open the selected "
-                                  "channel's menu in Tools → Scanner Menu",
+                                  "channel's menu in Tools → Scanner → Scanner Menu",
                                   self.channel_menu, "#536779"))
         row.addStretch(1)
         v.addLayout(row)
@@ -18911,7 +18911,7 @@ class AdsbFeed(QObject):
 
 
 class AircraftWindow(QWidget):
-    """Tools → Aircraft (ADS-B)…"""
+    """Tools → Maps → Aircraft (ADS-B)…"""
     NOW_COLUMNS = ["Callsign", "Registration", "Type", "Squawk", "Altitude (ft)", "Speed (kt)", "Where", "Seen"]
 
     def __init__(self, monitor):
@@ -19292,7 +19292,7 @@ class RdioUploader(QObject):
 
 
 class RdioDialog(QDialog):
-    """Tools → Send Calls to Rdio Scanner…"""
+    """Tools → Alerts → Send Calls to Rdio Scanner…"""
 
     def __init__(self, monitor):
         super().__init__(monitor)
@@ -19378,6 +19378,403 @@ class RdioDialog(QDialog):
         self.show_state(("✓ " if ok else "✗ ") + text)
 
 
+# ---- Custom Search (v1.1.64) -------------------------------------------------------------------
+#
+# Tools → Custom Search…: the scanner's search banks (GLT,CS_BANK), starting Custom Search
+# (JPM,CTM_MODE) and Quick Search Hold, and a list of every frequency the search stopped on.
+# Hits are the receptions logged while the scanner reports a search mode (SrchFrequency).
+
+SEARCH_MODES = ("Custom Search", "Custom Search Hold", "Quick Search", "Quick Search Hold")
+SEARCH_BANK_COLUMNS = ["Bank", "State", "Name", "Lower", "Upper", "Modulation", "Step"]
+SEARCH_HIT_COLUMNS = ["Last heard", "Frequency", "Bank", "Heard", "Air time (s)", "Best RSSI",
+                      "Talkgroup", "Units", "First heard"]
+
+
+def search_avoid_command(mhz, status):
+    """AVD for a search frequency: AFREQ in 100 Hz units (spec note 1); 1 permanent, 2 temporary, 3 stop."""
+    return f"AVD,AFREQ,{round(mhz * 10000)},,{status}"
+
+
+class CustomSearchWindow(QWidget):
+    """Tools → Custom Search…"""
+
+    def __init__(self, monitor):
+        super().__init__(monitor)
+        analysis_window(self, monitor, "Custom Search", "search/geometry", (1180, 780))
+        self.monitor = monitor
+        self.banks = []                  # GLT,CS_BANK entries, in the scanner's order
+        self.glt_pending = 0
+        self.hits = {}                   # frequency text -> hit
+        self.mode = ""
+        self.bank_status = ""            # GSI SearchBanks BankStatus: "1011000000", banks 0-9 (v1.1.65)
+        self.current_bank = ""           # GSI SearchBanks BankNo
+        self.pending = None              # (command, what, retry command or None)
+        self.gated = []
+        layout = QVBoxLayout(self)
+        self.mode_label = make_label("")
+        layout.addWidget(self.mode_label)
+        intro = make_label("The scanner searches its ten custom search banks (set the ranges with EDIT RANGE). "
+                           "Every frequency it stops on is listed below and also saved in reception history. "
+                           "Double-click a hit to listen there (Quick Search Hold).")
+        intro.setWordWrap(True)
+        set_css(intro, "color:#a5bdd2;")
+        layout.addWidget(intro)
+
+        banks_box = QGroupBox("SEARCH BANKS (from the scanner)")
+        bl = QVBoxLayout(banks_box)
+        self.bank_table = unit_table(SEARCH_BANK_COLUMNS)
+        self.bank_table.setMaximumHeight(300)
+        bl.addWidget(self.bank_table)
+        self.bank_note = make_label("")
+        self.bank_note.setWordWrap(True)
+        set_css(self.bank_note, "color:#a5bdd2;")
+        bl.addWidget(self.bank_note)
+        row = QHBoxLayout()
+        for label, tip, slot, colour in (
+                ("LOAD BANKS", "Read the search banks from the scanner (GLT,CS_BANK)", self.load_banks, "#344d71"),
+                ("EDIT RANGE ON SCANNER…", "Open the selected bank's range in Scanner Menu", self.edit_range, "#344d71"),
+                ("TURN BANK ON / OFF", "While searching: press the bank's number key on the scanner",
+                 self.toggle_bank, "#344d71"),
+                ("▶ START CUSTOM SEARCH", "Start Custom Search (JPM,CTM_MODE)", self.start_search, "#1b8a5a"),
+                ("■ RESUME SCAN", "Leave search and resume scanning", self.resume_scan, "#bd6b23")):
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            set_css(b, f"QPushButton{{background:{colour};color:white;font-weight:700;padding:7px 12px;}}"
+                       "QPushButton:disabled{background:#414750;color:#9ca4b0;}")
+            b.clicked.connect(lambda checked=False, s=slot: s())
+            row.addWidget(b)
+            self.gated.append(b)
+        row.addStretch(1)
+        bl.addLayout(row)
+        layout.addWidget(banks_box)
+
+        qs = QHBoxLayout()
+        qs.addWidget(make_label("Quick Search from"))
+        self.qs_entry = QLineEdit()
+        self.qs_entry.setPlaceholderText("MHz, e.g. 154.430")
+        self.qs_entry.returnPressed.connect(self.quick_search)
+        qs.addWidget(self.qs_entry)
+        go = QPushButton("QUICK SEARCH HOLD")
+        go.clicked.connect(lambda checked=False: self.quick_search())
+        qs.addWidget(go)
+        self.gated.append(go)
+        qs.addStretch(1)
+        layout.addLayout(qs)
+
+        hits_box = QGroupBox("HITS (since the program started)")
+        hl = QVBoxLayout(hits_box)
+        top = QHBoxLayout()
+        self.hit_filter = QLineEdit()
+        self.hit_filter.setPlaceholderText("Filter hits…")
+        self.hit_filter.textChanged.connect(lambda _t: self.refresh_hits())
+        top.addWidget(self.hit_filter, 1)
+        self.hit_count = make_label("0 hits")
+        top.addWidget(self.hit_count)
+        hl.addLayout(top)
+        self.hit_table = unit_table(SEARCH_HIT_COLUMNS)
+        self.hit_table.cellDoubleClicked.connect(lambda r, _c: self.listen(self.hit_in_row(r)))
+        self.hit_table.customContextMenuRequested.connect(self.hit_menu)
+        hl.addWidget(self.hit_table, 1)
+        bottom = QHBoxLayout()
+        export = QPushButton("EXPORT CSV…")
+        export.clicked.connect(lambda checked=False: self.export_hits())
+        clear = QPushButton("CLEAR LIST")
+        clear.clicked.connect(lambda checked=False: self.clear_hits())
+        bottom.addWidget(export)
+        bottom.addWidget(clear)
+        bottom.addStretch(1)
+        hl.addLayout(bottom)
+        layout.addWidget(hits_box, 1)
+        self.feedback = make_label("")
+        self.feedback.setWordWrap(True)
+        layout.addWidget(self.feedback)
+        self.set_mode("")
+        self.connection_changed(bool(getattr(monitor, "connected", False)))
+
+    # -- window --
+    def open(self):
+        restore_window(self, self.monitor)
+        if self.monitor.connected and not self.banks:
+            self.load_banks()
+
+    def save_settings(self, settings):
+        if self.geometry_restored:
+            settings.setValue(self.geometry_key, self.saveGeometry())
+
+    def say(self, text, tone=None):
+        set_text(self.feedback, text)
+        set_css(self.feedback, {"ok": "color:#7ee3a5;", "bad": "color:#ff9e91;"}.get(tone, "color:#c9d6e6;"))
+
+    def connection_changed(self, connected):
+        for b in self.gated:
+            b.setEnabled(connected)
+
+    def set_mode(self, mode, bank="", frequency=""):
+        searching = mode in SEARCH_MODES
+        text = (f"{mode.upper()}: ACTIVE" + (f" • {frequency}" if frequency else "")
+                + (f" • bank {bank}" if bank else "")) if searching else "Custom Search: not active"
+        set_text(self.mode_label, text)
+        set_css(self.mode_label, "font-size:20px;font-weight:700;padding:4px;"
+                + ("color:#52dc95;" if searching else "color:#e6a65a;"))
+
+    def gsi(self, mode, bank="", frequency="", status="", bank_no=""):
+        """Called for every status report. In Custom Search the scanner also reports which of
+        banks 0-9 are on (BankStatus, one digit per bank) and the bank it is in (BankNo)."""
+        if mode != self.mode or mode in SEARCH_MODES:
+            self.mode = mode
+            label = f"{bank_no} {bank}".strip() if bank_no else bank
+            self.set_mode(mode, label, frequency)
+        status = status if re.fullmatch(r"[01]{10}", status or "") else ""
+        if status and (status != self.bank_status or bank_no != self.current_bank):
+            self.bank_status, self.current_bank = status, bank_no
+            self.fill_banks()
+
+    # -- banks --
+    def load_banks(self):
+        self.banks = []
+        if self.monitor.request_glt("search", "GLT,CS_BANK"):
+            self.glt_pending += 1
+            self.say("Reading the search banks from the scanner…")
+        else:
+            self.say("Not connected — nothing was sent.", "bad")
+
+    def handle_list(self, xml):
+        self.glt_pending = max(0, self.glt_pending - 1)
+        try:
+            root = ET.fromstring(xml)
+        except ET.ParseError:
+            self.say("GLT,CS_BANK: the scanner's list could not be read.", "bad")
+            return
+        for element in root:
+            if element.tag != "Footer":
+                self.banks.append({k: v.strip() for k, v in element.attrib.items()})
+        footer = root.find("Footer")
+        if footer is not None and footer.attrib.get("EOT", "1") == "0":
+            if self.monitor.request_glt("search", "GLT,CS_BANK"):
+                self.glt_pending += 1
+        self.fill_banks()
+        self.say(f"{len(self.banks)} search bank(s) on the scanner.", "ok")
+
+    def handle_list_error(self, body):
+        self.glt_pending = max(0, self.glt_pending - 1)
+        self.say(f"GLT,CS_BANK: the scanner replied {body}. This firmware may not list search banks; "
+                 "EDIT RANGE and START still work.", "bad")
+
+    def bank_numbers(self):
+        """The scanner's bank number (0-9) for each listed bank: its Index when the list uses 0-9,
+        otherwise its place in the list counted from 0."""
+        indexes = [b.get("Index", "") for b in self.banks]
+        if indexes and all(i.isdigit() and int(i) <= 9 for i in indexes) and len(set(indexes)) == len(indexes):
+            return [int(i) for i in indexes]
+        return list(range(len(self.banks)))
+
+    def bank_state(self, number):
+        if not self.bank_status or not 0 <= number <= 9:
+            return "?"
+        return "On" if self.bank_status[number] == "1" else "Off"
+
+    def fill_banks(self):
+        banks = self.banks or ([{}] * 10 if self.bank_status else [])
+        numbers = self.bank_numbers() if self.banks else list(range(10))
+        self.row_numbers = numbers
+        rows = [[("▶ " if str(n) == self.current_bank and self.mode in SEARCH_MODES else "") + str(n),
+                 self.bank_state(n), b.get("Name", "") or "—", b.get("Lower", "—"), b.get("Upper", "—"),
+                 b.get("Mod", "—"), b.get("Step", "—")]
+                for n, b in zip(numbers, banks)]
+        fill_table(self.bank_table, rows)
+        for r in range(self.bank_table.rowCount()):
+            item = self.bank_table.item(r, 1)
+            if item is not None and item.text() in ("On", "Off"):
+                item.setForeground(tc("#7ee3a5" if item.text() == "On" else "#ff9e91"))
+        set_text(self.bank_note, "On / Off as the scanner reported it while searching."
+                 if self.bank_status else
+                 "On / Off shows once the scanner is searching: it only reports its banks in Custom Search.")
+
+    def selected_bank(self):
+        """(bank number 0-9, bank) of the highlighted row, or (None, None)."""
+        index = table_row_index(self.bank_table, self.bank_table.currentRow())
+        numbers = getattr(self, "row_numbers", [])
+        if index is None or index >= len(numbers):
+            return None, None
+        return numbers[index], (self.banks[index] if index < len(self.banks) else {})
+
+    def edit_range(self):
+        number, bank = self.selected_bank()
+        if number is None:
+            self.say("Choose a bank first.")
+            return
+        menu = self.monitor.scanner_menu
+        menu.open()
+        i = menu.menu_id.findData("SRCH_RANGE")
+        if i >= 0:
+            menu.menu_id.setCurrentIndex(i)
+        index = str((bank or {}).get("Index", ""))
+        menu.menu_index.setValue(int(index) if index.isdigit() else number)
+        if self.monitor.connected:
+            menu.open_menu()
+        self.say("Change the range in Scanner Menu; LOAD BANKS reads it back.")
+
+    def toggle_bank(self):
+        number, _bank = self.selected_bank()
+        if number is None:
+            self.say("Choose a bank first.")
+            return
+        if self.mode not in ("Custom Search",):
+            self.say("Start Custom Search first: the scanner turns banks on and off with their number "
+                     "keys only while it is searching.", "bad")
+            return
+        key = str(number)                        # banks 0-9 are the scanner's number keys 0-9
+        self.monitor.send_key_sequence((key,), f"Bank {number} on/off (key {key})")
+        self.say(f"Bank {number} on/off sent; its state updates with the next status report.")
+
+    # -- search --
+    def send(self, command, what, retry=None):
+        if not self.monitor.queue(command):
+            self.say("Not connected — nothing was sent.", "bad")
+            return False
+        self.pending = (command, what, retry)
+        self.say(f"{what}…")
+        return True
+
+    def start_search(self):
+        self.send("JPM,CTM_MODE,", "Starting Custom Search", retry="JPM,CTM_MODE,0")
+
+    def resume_scan(self):
+        self.send("JPM,SCN_MODE,4294967295", "Resuming scan")
+
+    def quick_search(self, mhz=None):
+        if mhz is None:
+            try:
+                mhz = self.monitor.validate_mhz(self.qs_entry.text())
+            except ValueError as exc:
+                self.say(str(exc), "bad")
+                return
+        self.monitor.tune_frequency(mhz)
+        self.say(f"Quick Search Hold on {mhz:.4f} MHz sent.")
+
+    def route(self, reply):
+        """JPM / AVD replies to commands from this window. Returns False (they also go to the status line)."""
+        if self.pending is None:
+            return False
+        command, what, retry = self.pending
+        code = command.split(",")[0]
+        if not reply.startswith(f"REPLY: {code},"):
+            return False
+        self.pending = None
+        if reply.rstrip().endswith(",OK"):
+            self.say(f"✓ {what}: done.", "ok")
+        elif retry:
+            self.send(retry, what)
+        else:
+            self.say(f"The scanner refused: {what} ({reply[7:]}).", "bad")
+        return False
+
+    # -- hits --
+    def add_hit(self, event, row):
+        """A reception logged in a search mode ended."""
+        info = event["info"]
+        freq = info["Frequency"]
+        hit = self.hits.get(freq)
+        if hit is None:
+            hit = self.hits[freq] = {"frequency": freq, "first": row[0], "count": 0, "seconds": 0.0,
+                                     "rssi": None, "units": [], "talkgroup": "—", "bank": "—"}
+        hit["last"] = row[0]
+        hit["count"] += 1
+        try:
+            hit["seconds"] += float(row[2])
+        except ValueError:
+            pass
+        try:
+            rssi = float(row[8])
+            if rssi > -999 and (hit["rssi"] is None or rssi > hit["rssi"]):
+                hit["rssi"] = rssi
+        except (ValueError, IndexError):
+            pass
+        if info.get("Department") not in (None, "", "—"):
+            hit["bank"] = info["Department"]
+        if info.get("Talkgroup") not in (None, "", "—"):
+            hit["talkgroup"] = info["Talkgroup"]
+        for unit in event.get("units", []):
+            if unit not in hit["units"]:
+                hit["units"].append(unit)
+        self.refresh_hits()
+
+    def hit_values(self, hit):
+        return [hit["last"], hit["frequency"], hit["bank"], hit["count"], round(hit["seconds"], 1),
+                "—" if hit["rssi"] is None else int(hit["rssi"]), hit["talkgroup"],
+                ", ".join(hit["units"]) or "—", hit["first"]]
+
+    def shown_hits(self):
+        term = self.hit_filter.text().strip().casefold()
+        hits = [h for h in self.hits.values()
+                if not term or any(term in str(v).casefold() for v in self.hit_values(h))]
+        return sorted(hits, key=lambda h: h["last"], reverse=True)
+
+    def refresh_hits(self):
+        self.shown = self.shown_hits()
+        fill_table(self.hit_table, [self.hit_values(h) for h in self.shown], numeric=(3, 4, 5))
+        set_text(self.hit_count, f"{len(self.shown):,} / {len(self.hits):,} hits")
+
+    def hit_in_row(self, row):
+        index = table_row_index(self.hit_table, row)
+        shown = getattr(self, "shown", [])
+        return shown[index] if index is not None and index < len(shown) else None
+
+    def hit_menu(self, point):
+        index = table_row_index(self.hit_table, point)
+        shown = getattr(self, "shown", [])
+        if index is None or index >= len(shown):
+            return
+        hit = shown[index]
+        menu = QMenu(self)
+        on = self.monitor.connected
+        for label, slot in (("Listen here (Quick Search Hold)", lambda: self.listen(hit)),
+                            ("Avoid temporarily", lambda: self.avoid(hit, 2)),
+                            ("Avoid permanently…", lambda: self.avoid(hit, 1)),
+                            ("Stop avoiding", lambda: self.avoid(hit, 3))):
+            action = menu.addAction(label, slot)
+            action.setEnabled(on)
+        menu.addSeparator()
+        menu.addAction("Copy frequency", lambda: QApplication.clipboard().setText(
+            f"{parse_mhz(hit['frequency']) or hit['frequency']}"))
+        menu.exec(self.hit_table.viewport().mapToGlobal(point))
+
+    def listen(self, hit):
+        mhz = parse_mhz(hit["frequency"]) if hit else None
+        if mhz:
+            self.quick_search(mhz)
+
+    def avoid(self, hit, status, confirm=True):
+        mhz = parse_mhz(hit["frequency"])
+        if not mhz:
+            return
+        if status == 1 and confirm and QMessageBox.question(
+                self, "Avoid permanently", f"Avoid {mhz:.4f} MHz in search until you remove the avoid?") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        what = {1: "Permanent avoid", 2: "Temporary avoid", 3: "Stop avoiding"}[status]
+        self.send(search_avoid_command(mhz, status), f"{what} of {mhz:.4f} MHz")
+
+    def export_hits(self):
+        hits = self.shown_hits()
+        if not hits:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export search hits",
+                                              str(Path.home() / "search_hits.csv"), "CSV files (*.csv)")
+        if path:
+            try:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(SEARCH_HIT_COLUMNS)
+                    writer.writerows(self.hit_values(h) for h in hits)
+            except OSError as exc:
+                QMessageBox.warning(self, "Export failed", str(exc))
+
+    def clear_hits(self):
+        self.hits = {}
+        self.refresh_hits()
+
+
 class Monitor(QMainWindow):
     # Re-emits every reply from whichever serial thread is current.
     scanner_output = pyqtSignal(str)
@@ -19441,6 +19838,7 @@ class Monitor(QMainWindow):
         self.close_call_window = None
         self.build_ui()
         self.discovery = DiscoveryWindow(self)
+        self.custom_search = CustomSearchWindow(self)
         self.screen_mirror = ScreenMirror(self)
         self.analyze = AnalyzeWindow(self)
         self.cc_scanner_hits = ScannerCcHits(self)
@@ -19620,7 +20018,7 @@ class Monitor(QMainWindow):
 
     def glt_target(self):
         owner = self.glt_owners.popleft() if self.glt_owners else "tools"
-        return {"discovery": self.discovery, "console": self.console,
+        return {"discovery": self.discovery, "console": self.console, "search": self.custom_search,
                 "modes": self.modes_window, "screc": self.screc_window,
                 "cchits": self.cc_scanner_hits}.get(owner, self.scanner_tools)
 
@@ -19703,7 +20101,7 @@ class Monitor(QMainWindow):
             action.setEnabled(ready)
 
     def open_scanner_menu(self, menu_id):
-        """Tools → Scanner Menu, opened straight onto one of the scanner's menus."""
+        """Tools → Scanner → Scanner Menu, opened straight onto one of the scanner's menus."""
         menu = self.scanner_menu
         menu.open()
         index = menu.menu_id.findData(menu_id)
@@ -19987,27 +20385,31 @@ class Monitor(QMainWindow):
         view_menu = self.menuBar().addMenu("View")
         view_menu.addAction("Transcription…", self.open_transcription)
         view_menu.addSeparator()
+        # Tools (v1.1.64): the windows used most at the top, the rest grouped in submenus.
         tools_menu = self.menuBar().addMenu("Tools")
         tools_menu.addAction("Analyze…", lambda: self.open_analyze())
-        tools_menu.addAction("Scanner Menu…", lambda: self.scanner_menu.open())
-        tools_menu.addAction("Command Console…", lambda: self.console.open())
-        tools_menu.addSeparator()
-        tools_menu.addAction("Scanner Screen…", lambda: self.screen_mirror.open())
-        tools_menu.addAction("Scanner Tools…", self.open_scanner_tools)
-        tools_menu.addSeparator()
-        tools_menu.addAction("Macro Keypad…", lambda: self.macro_keypad.open())
-        tools_menu.addAction("Activity Watch…",
-                             lambda: self.open_analysis("activity_window", ActivityWatchWindow))
-        tools_menu.addAction("Phone Alerts…", lambda: PhoneSettingsDialog(self).exec())
-        tools_menu.addAction("Send Calls to Rdio Scanner…", lambda: RdioDialog(self).exec())
-        tools_menu.addSeparator()
-        tools_menu.addAction("GPS…", lambda: GpsSettingsDialog(self).exec())
-        tools_menu.addAction("Places and Map…", lambda: self.open_analysis("places_window", PlacesWindow))
-        tools_menu.addAction("Ten Codes…", lambda: self.open_analysis("ten_codes_window", TenCodesWindow))
-        tools_menu.addAction("Aircraft (ADS-B)…", lambda: self.open_analysis("aircraft_window", AircraftWindow))
-        tools_menu.addSeparator()
+        tools_menu.addAction("Custom Search…", lambda: self.custom_search.open())
         tools_menu.addAction("Antenna Test…",
                              lambda: self.open_analysis("antenna_window", AntennaTestWindow))
+        tools_menu.addSeparator()
+        scanner_sub = tools_menu.addMenu("Scanner")
+        scanner_sub.addAction("Scanner Screen…", lambda: self.screen_mirror.open())
+        scanner_sub.addAction("Scanner Menu…", lambda: self.scanner_menu.open())
+        scanner_sub.addAction("Scanner Tools…", self.open_scanner_tools)
+        scanner_sub.addAction("Command Console…", lambda: self.console.open())
+        alerts_sub = tools_menu.addMenu("Alerts")
+        alerts_sub.addAction("Activity Watch…",
+                             lambda: self.open_analysis("activity_window", ActivityWatchWindow))
+        alerts_sub.addAction("Phone Alerts…", lambda: PhoneSettingsDialog(self).exec())
+        alerts_sub.addAction("Send Calls to Rdio Scanner…", lambda: RdioDialog(self).exec())
+        maps_sub = tools_menu.addMenu("Maps")
+        maps_sub.addAction("GPS…", lambda: GpsSettingsDialog(self).exec())
+        maps_sub.addAction("Places and Map…", lambda: self.open_analysis("places_window", PlacesWindow))
+        maps_sub.addAction("Aircraft (ADS-B)…", lambda: self.open_analysis("aircraft_window", AircraftWindow))
+        tools_menu.addSeparator()
+        tools_menu.addAction("Ten Codes…", lambda: self.open_analysis("ten_codes_window", TenCodesWindow))
+        keypad_sub = tools_menu.addMenu("Macro Keypad")
+        keypad_sub.addAction("Macro Keypad…", lambda: self.macro_keypad.open())
         discovery_menu = self.menuBar().addMenu("Discovery")
         discovery_menu.addAction("Discovery Control…", self.open_discovery)
         self.discovery_load_action = discovery_menu.addAction(
@@ -21438,6 +21840,7 @@ class Monitor(QMainWindow):
             self.handle_jnt_reply(reply[len("REPLY: JNT,"):])
             return True
         self.discovery.route(reply)
+        self.custom_search.route(reply)
         if self.analyze.route(reply):
             return True
         if self.modes_window.route(reply):
@@ -22255,6 +22658,7 @@ class Monitor(QMainWindow):
             self.update_waterfall_controls()
             self.glt_owners.clear()
             self.discovery.connection_changed(False)
+            self.custom_search.connection_changed(False)
             self.screen_mirror.connection_changed(False)
             self.analyze.connection_changed(False)
             self.scanner_menu.connection_changed(False)
@@ -22285,6 +22689,7 @@ class Monitor(QMainWindow):
             self.reconnect_attempts = 0
             self.last_rx = time.monotonic()
             self.discovery.connection_changed(True)
+            self.custom_search.connection_changed(True)
             self.screen_mirror.connection_changed(True)
             self.analyze.connection_changed(True)
             self.scanner_menu.connection_changed(True)
@@ -22322,6 +22727,15 @@ class Monitor(QMainWindow):
         except Exception as exc:          # a test must never stop monitoring
             self.statusBar().showMessage(f"Antenna Test: {exc}", 5000)
         self.close_call.gsi(root.attrib.get("Mode", ""))
+        try:
+            srch = root.find("SrchFrequency")
+            banks = root.find("SearchBanks")
+            bank = (lambda key: banks.attrib.get(key, "").strip() if banks is not None else "")
+            self.custom_search.gsi(root.attrib.get("Mode", ""), bank("Name"),
+                                   srch.attrib.get("Freq", "").strip() if srch is not None else "",
+                                   bank("BankStatus"), bank("BankNo"))
+        except Exception as exc:          # a window must never stop monitoring
+            self.statusBar().showMessage(f"Custom Search: {exc}", 5000)
         system = root.find("System")
         department = root.find("Department")
         self.current_system_index = self.valid_index(system)
@@ -22558,6 +22972,11 @@ class Monitor(QMainWindow):
             self.statusBar().showMessage(f"Close Call: {exc}", 5000)
         if event.get("discovery"):
             self.discovery.add_hit(event, row)
+        if info["System"] in SEARCH_MODES:
+            try:
+                self.custom_search.add_hit(event, row)
+            except Exception as exc:      # analysis must never stop logging
+                self.statusBar().showMessage(f"Custom Search: {exc}", 5000)
         if self.audio is not None:
             self.audio.end({"start": event["start"], "row": row, "info": info,
                             "site": event.get("site", "—"),
@@ -22690,6 +23109,7 @@ class Monitor(QMainWindow):
             self.settings.setValue("waterfall/splitter", self.waterfall_splitter.saveState())
         self.settings.setValue("waterfall/open", self.waterfall_window.isVisible())
         self.discovery.save_settings(self.settings)
+        self.custom_search.save_settings(self.settings)
         self.screen_mirror.save_settings(self.settings)
         self.analyze.save_settings(self.settings)
         self.scanner_menu.save_settings(self.settings)
