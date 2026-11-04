@@ -2,6 +2,14 @@
 
 Newest first. Versions before 1.1.47 were tested by hand on a real SDS100; from 1.1.47 on, every version also passes the automated tests.
 
+## v1.1.63: Calls to Rdio Scanner
+
+- **New: Tools → Send Calls to Rdio Scanner…** sends every recorded call (PC audio capture) to an [Rdio Scanner](https://github.com/chuot/rdio-scanner) server (free, GPL v3). Rdio Scanner plays them on your phone or in any browser, with the system, talkgroup, channel and units, and lets you replay calls and choose talkgroups. With a VPN such as Tailscale it works away from home too, on a home connection with a changing address.
+  - Talkgroups are sent with their TGID; conventional channels with their frequency in kHz (155.340 MHz → 155340). Each scanner system gets a number of its own, shown and editable in the window.
+  - Calls that can't be sent (server off, no network) are kept, including over a restart, and sent when it's back, oldest first (up to 500). If the server refuses the API key, sending pauses until the settings are changed.
+  - **TEST CONNECTION** checks that the server answers.
+- 11 new tests (the form sent, talkgroup and system numbers, retries and a real upload to a local test server).
+
 ## v1.1.62: Keypad internals
 
 - The Macro Keypad tells other windows when an action changes. No visible change in this edition.

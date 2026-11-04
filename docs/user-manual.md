@@ -1,12 +1,12 @@
 # SDS100 Monitor User Manual
 
-Version 1.1.62 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
+Version 1.1.63 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
 
 Use the outline button (☰) at the top right of this file to jump to a chapter.
 
 ## About this manual
 
-This manual describes **SDS100 Monitor version 1.1.62**, a Linux program for monitoring and controlling a Uniden SDS100 scanner from a PC over its USB cable. It runs on desktop Linux PCs and on the Raspberry Pi (chapter 25).
+This manual describes **SDS100 Monitor version 1.1.63**, a Linux program for monitoring and controlling a Uniden SDS100 scanner from a PC over its USB cable. It runs on desktop Linux PCs and on the Raspberry Pi (chapter 25).
 
 The chapters follow the program's menus and panels. Chapters 1 to 4 cover installing, connecting and the main window, and are worth reading first. The rest can be read as you need them.
 
@@ -91,7 +91,7 @@ SDS100 Monitor is installed as a Debian package, which apt sets up together with
 1. Download `sds100-monitor_<version>_all.deb` from the project's releases page, **github.com/jmlynchjr/SDS-MONITOR/releases**.
 2. In a terminal, in the folder you downloaded it to, run:
 
-   `sudo apt install ./sds100-monitor_1.1.62_all.deb`
+   `sudo apt install ./sds100-monitor_1.1.63_all.deb`
 
    (use the version you downloaded). apt also installs PyQt6 and pyserial if they're missing, and Qt Multimedia and `ffmpeg`, which PC audio capture needs (chapter 9).
 
@@ -229,7 +229,7 @@ Most tools open in their own window rather than as a panel: the waterfall, the S
 |---|---|
 | **History** | Browse CSV archives…, Activity Charts…, Unit ID Log…, Unit Profile…, Audio Recordings…, Search Everything… (Ctrl+F), Fleet Map…, Incidents…, Daily Report…, Unit Name Suggestions… |
 | **View** | Transcription…, the four panels, Detach/Dock for each panel, Scanner Screen…, Waterfall…, Scanner Tools…, Return all panels to tabs, Theme |
-| **Tools** | Analyze…, Scanner Menu…, Command Console…, Scanner Screen…, Scanner Tools…, Macro Keypad…, Activity Watch…, Phone Alerts…, GPS…, Places and Map…, Ten Codes…, Antenna Test…, Aircraft (ADS-B)… (chapter 26) |
+| **Tools** | Analyze…, Scanner Menu…, Command Console…, Scanner Screen…, Scanner Tools…, Macro Keypad…, Activity Watch…, Phone Alerts…, Send Calls to Rdio Scanner… (chapter 9), GPS…, Places and Map…, Ten Codes…, Antenna Test…, Aircraft (ADS-B)… (chapter 26) |
 | **Discovery** | Discovery Control…, Load Sessions, Start Last Session, Exit Discovery (Resume Scan) |
 | **Close Call** | Close Call Hits…, Mode: Off / Priority / Do Not Disturb, Check Current Mode, Start Close Call Only, Resume Scan, Close Call Bands…, Close Call Settings on Scanner… |
 | **Modes** | Weather and Tone-Out…, Weather (Weather Scan; Weather Alert: Alert Only, SAME 1–5, All FIPS), Start Tone-Out, Scanner Recordings…, Resume Scan (chapter 20) |
@@ -638,6 +638,29 @@ The same fields are also stored separately (START, END, DURATION, SYSTEM, DEPART
 - **History → Audio Recordings…** (or **RECORDINGS…** in the panel): choose a day, search, and double-click to play in your default audio player. New recordings appear while the window is open.
 - Right-click a reception in history → **Play Recording**.
 - Recordings can also be played from Transcription, unit profiles, Search Everything, Incidents, Places and Close Call.
+
+### Listening on your phone: Rdio Scanner
+
+**Tools → Send Calls to Rdio Scanner…** sends every recorded call to an **Rdio Scanner** server, a free (GPL v3) web app for scanner traffic. On your phone or in any browser it lists the calls with their system, talkgroup, channel and units, plays them live, lets you replay them and choose which talkgroups to hear, and can be added to the phone's home screen like an app.
+
+**Setting up Rdio Scanner** (once, on this PC or another one that is always on):
+
+1. Install Rdio Scanner from its project page, github.com/chuot/rdio-scanner, and start it. It listens on port 3000.
+2. Open its admin page (`http://127.0.0.1:3000/admin`), set the admin password, then:
+   - **Options → Auto Populate** on, so systems and talkgroups are created as calls arrive;
+   - **API Keys → new key**, allowed for all systems. Copy the key.
+3. In the Monitor, open **Tools → Send Calls to Rdio Scanner…**, tick **Send recorded calls to Rdio Scanner**, enter the **Server** (`http://127.0.0.1:3000` on the same PC) and the **API key**, and press **TEST CONNECTION**.
+
+PC audio capture must be on (chapter 9): only recorded calls are sent.
+
+**How calls are numbered:** Rdio Scanner needs whole numbers. Talkgroups use their TGID; conventional channels their frequency in kHz (155.340 MHz becomes 155340). Each scanner system gets a number of its own the first time it is heard; the window lists them as *name = number*, and you can change them to match systems you set up in Rdio Scanner yourself.
+
+**When the server can't be reached,** calls are kept (up to 500, also over a restart) and sent when it is back, oldest first. If the server refuses the API key, sending pauses until you change the settings. The window shows how many calls were sent and how many are waiting.
+
+**Away from home:** don't open Rdio Scanner to the internet. Put the PC and your phone on a private VPN instead. **Tailscale** is the easiest and works with a home connection whose address changes, or one behind your provider's shared address (CGNAT): install it on the PC and the phone, sign in to both, and open `http://<PC name>:3000` on the phone. Plain **WireGuard** works too, but needs a forwarded port and a dynamic DNS name, and doesn't work behind CGNAT.
+
+> [!TIP]
+> Rdio Scanner sends only the calls, not the silence between them, so it uses little mobile data, and calls missed while the signal dropped can be replayed.
 
 ## 10. Transcription
 
@@ -1494,7 +1517,7 @@ Use **Raspberry Pi OS 64-bit, with desktop** (Bookworm or newer), on a good micr
 
 3. Download `sds100-monitor_<version>_all.deb` on the Pi (from the releases page in its web browser), and install it in a terminal, in the folder you downloaded it to:
 
-   `sudo apt install ./sds100-monitor_1.1.62_all.deb`
+   `sudo apt install ./sds100-monitor_1.1.63_all.deb`
 
    The package is the same one as for a PC: it's pure Python, marked *all* for every processor.
 
@@ -1624,6 +1647,7 @@ All data is kept in your home folder, mostly under `~/SDS100Monitor`. Everything
 | `~/SDS100Monitor/mode_alerts/mode_alerts_YYYY-MM-DD.csv` | Weather and Tone-Out alerts (chapter 20) |
 | `~/SDS100Monitor/ten_codes.json` | Your ten-code lists (chapter 21) |
 | `~/SDS100Monitor/reports/` | Saved daily reports (chapter 22) |
+| `~/SDS100Monitor/rdio_queue.json` | Calls waiting to be sent to Rdio Scanner (chapter 9) |
 | `~/SDS100Monitor/adsb/adsb_alerts_YYYY-MM-DD.csv` | Aircraft squawk and watch-list alerts (chapter 26) |
 | `~/SDS100Monitor/adsb/aircraft_heard_YYYY-MM-DD.csv` | Callsigns matched in transcripts (chapter 26) |
 | `~/.config/SDS100Monitor/` | Program settings: window layout, options, alert rules, theme, phone alerts, update check |

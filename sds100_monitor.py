@@ -24,6 +24,7 @@ import sys
 import threading
 import tempfile
 import time
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
@@ -33,7 +34,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.1.62"
+VERSION = "1.1.63"
 
 # Qt 6.10's new PipeWire audio backend can crash the program while it lists audio devices at
 # start (segmentation fault inside PipeWire, seen with Qt 6.10.2 / PipeWire 1.6.2; it also prints
@@ -19059,6 +19060,324 @@ class AircraftWindow(QWidget):
                                        for r in reversed(alerts)])
 
 
+# ---- Rdio Scanner (v1.1.63) ------------------------------------------------------------------
+#
+# Sends each recorded call (PC audio capture) to an Rdio Scanner server
+# (https://github.com/chuot/rdio-scanner, GPL v3), which plays them on a phone or any browser with
+# their system, talkgroup and units. Calls go to <server>/api/call-upload as a multipart form
+# (Rdio Scanner's docs/api.md). Calls that can't be sent are kept and tried again, also after a
+# restart. Rdio Scanner needs whole-number IDs: talkgroups use their TGID, conventional channels
+# their frequency in kHz, and each scanner system gets a number of its own (editable).
+
+RDIO_QUEUE_FILE = DATA_DIR / "rdio_queue.json"
+RDIO_QUEUE_MAX = 500
+RDIO_RETRY_MS = 60_000
+
+
+def rdio_talkgroup(row):
+    """Rdio Scanner talkgroup number: the TGID, or the frequency in kHz for a conventional channel."""
+    m = re.search(r"TGID[:\s]*(\d+)", str(row[7] or ""), re.I)
+    if m:
+        return int(m.group(1))
+    mhz = parse_mhz(row[6])
+    return int(round(mhz * 1000)) if mhz else None
+
+
+def rdio_units(text):
+    return [int(u) for u in re.findall(r"UID:\s*(\d+)", str(text or ""))]
+
+
+def rdio_fields(row, key, system_id):
+    """The form fields for one call (an audio index row, AUDIO_HEADERS)."""
+    start = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S").astimezone()
+    fields = {"key": key, "dateTime": start.isoformat(timespec="seconds"),
+              "system": str(system_id), "systemLabel": row[3],
+              "talkgroup": str(rdio_talkgroup(row)), "talkgroupLabel": row[5] or row[7],
+              "talkgroupGroup": row[4]}
+    mhz = parse_mhz(row[6])
+    if mhz:
+        fields["frequency"] = str(int(round(mhz * 1_000_000)))
+    units = rdio_units(row[9])
+    if units:
+        fields["unit"] = str(units[0])
+        fields["units"] = json.dumps([{"id": u, "offset": 0} for u in units])
+    return fields
+
+
+def multipart_body(fields, file_field, file_name, data, mime="audio/mpeg"):
+    """(body bytes, Content-Type) of a multipart/form-data request."""
+    boundary = "----SDS100Monitor" + os.urandom(12).hex()
+    parts = []
+    for name, value in fields.items():
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+                     .encode() + str(value).encode("utf-8") + b"\r\n")
+    safe_name = file_name.replace('"', "_").replace("\r", "").replace("\n", "")
+    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; '
+                 f'filename="{safe_name}"\r\nContent-Type: {mime}\r\n\r\n'.encode("utf-8") + data + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def rdio_post(url, body, content_type, timeout=30):
+    """(HTTP status, reply text). Raises OSError when the server can't be reached."""
+    request = urllib.request.Request(url, data=body, method="POST", headers={
+        "Content-Type": content_type, "User-Agent": f"SDS100-Monitor/{VERSION}"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, response.read(4000).decode(errors="replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read(4000).decode(errors="replace")
+
+
+def rdio_upload_url(server):
+    server = str(server or "").strip().rstrip("/")
+    if server and not re.match(r"https?://", server):
+        server = "http://" + server
+    return server + ("" if server.endswith("/api/call-upload") else "/api/call-upload")
+
+
+class RdioUploader(QObject):
+    """Sends recorded calls to Rdio Scanner in the background, keeping the ones not yet sent."""
+    status = pyqtSignal(str, bool)            # text, ok (from the worker thread)
+
+    def __init__(self, monitor, post=rdio_post):
+        super().__init__(monitor)
+        self.monitor = monitor
+        self.post = post
+        self.lock = threading.Lock()
+        self.queue = self.load_queue()
+        self.sent_today = 0
+        self.last_text, self.last_ok = "Nothing sent yet.", True
+        self.paused = False                   # the server refused the key: wait for new settings
+        self.busy = False
+        self.status.connect(self.show_status)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.kick)
+        self.timer.start(RDIO_RETRY_MS)
+        if self.queue and self.enabled():
+            QTimer.singleShot(5000, self.kick)
+
+    # -- settings --
+    def setting(self, key, default=""):
+        return str(self.monitor.settings.value(f"rdio/{key}", default) or "")
+
+    def enabled(self):
+        return self.setting("enabled", "false") == "true" and bool(self.setting("url")) and bool(self.setting("key"))
+
+    def systems(self):
+        try:
+            data = json.loads(self.setting("systems", "{}") or "{}")
+        except ValueError:
+            data = {}
+        return {str(k): int(v) for k, v in data.items() if str(v).isdigit()}
+
+    def system_id(self, name):
+        """A lasting whole number for a scanner system name (new names get the next free one)."""
+        systems = self.systems()
+        if name not in systems:
+            systems[name] = max(systems.values(), default=0) + 1
+            self.monitor.settings.setValue("rdio/systems", json.dumps(systems))
+        return systems[name]
+
+    # -- queue --
+    def load_queue(self):
+        try:
+            data = json.loads(RDIO_QUEUE_FILE.read_text(encoding="utf-8"))
+            return [(str(p), list(r)) for p, r in data][-RDIO_QUEUE_MAX:]
+        except (OSError, ValueError, TypeError):
+            return []
+
+    def save_queue(self):
+        try:
+            if self.queue:
+                RDIO_QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                tmp = RDIO_QUEUE_FILE.with_suffix(".tmp")
+                tmp.write_text(json.dumps(self.queue), encoding="utf-8")
+                os.replace(tmp, RDIO_QUEUE_FILE)
+            else:
+                RDIO_QUEUE_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def call_saved(self, path, row):
+        """A call was recorded: queue it and send it (in the background)."""
+        if not self.enabled():
+            return
+        with self.lock:
+            self.queue.append((str(path), list(row)))
+            del self.queue[:-RDIO_QUEUE_MAX]
+            self.save_queue()
+        self.kick()
+
+    def settings_changed(self):
+        self.paused = False
+        self.kick()
+
+    def kick(self):
+        if self.busy or self.paused or not self.queue or not self.enabled():
+            return
+        self.busy = True
+        threading.Thread(target=self._work, daemon=True).start()
+
+    def _work(self):
+        try:
+            self.send_pending()
+        finally:
+            self.busy = False
+
+    # -- sending (worker thread; tests call it directly) --
+    def send_one(self, path, row):
+        """'sent', 'skip' (can never be sent), 'retry' (try later) or 'refused' (key or server)."""
+        path = Path(path)
+        talkgroup = rdio_talkgroup(row)
+        if not path.exists() or talkgroup is None:
+            return "skip", f"{path.name}: no audio file or no talkgroup/frequency; not sent."
+        fields = rdio_fields(row, self.setting("key"), self.system_id(row[3] or "Scanner"))
+        try:
+            body, ctype = multipart_body(fields, "audio", path.name, path.read_bytes())
+            code, text = self.post(rdio_upload_url(self.setting("url")), body, ctype)
+        except (OSError, ValueError) as exc:
+            return "retry", f"Rdio Scanner not reachable ({exc}); calls are kept and sent later."
+        low = text.lower()
+        if code == 200 and ("success" in low or "imported" in low):
+            return "sent", f"Sent {row[5] or row[7]} ({row[0][11:]})."
+        if "duplicate" in low:
+            return "sent", f"{row[5] or row[7]} ({row[0][11:]}) was already on the server."
+        if code in (401, 403) or "key" in low:
+            return "refused", f"Rdio Scanner refused the API key: {text.strip()[:200]}"
+        if code >= 500 or code == 0:
+            return "retry", f"Rdio Scanner error {code}: {text.strip()[:200]}"
+        return "skip", f"Rdio Scanner didn't take {path.name} ({code}): {text.strip()[:200]}"
+
+    def send_pending(self):
+        while True:
+            with self.lock:
+                if not self.queue or self.paused:
+                    return
+                path, row = self.queue[0]
+            result, text = self.send_one(path, row)
+            if result in ("sent", "skip"):
+                with self.lock:
+                    if self.queue and self.queue[0][0] == path:
+                        self.queue.pop(0)
+                    self.save_queue()
+                if result == "sent":
+                    self.sent_today += 1
+                self.status.emit(text, result == "sent")
+                continue
+            if result == "refused":
+                self.paused = True
+            self.status.emit(text, False)
+            return
+
+    def show_status(self, text, ok):
+        self.last_text, self.last_ok = text, ok
+        if not ok:
+            self.monitor.statusBar().showMessage(text, 10000)
+
+    def test(self):
+        """(ok, text): can the server be reached? The key is checked by the first call."""
+        url = rdio_upload_url(self.setting("url")).removesuffix("/api/call-upload") + "/"
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": f"SDS100-Monitor/{VERSION}"})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                page = response.read(20000).decode(errors="replace")
+            found = "rdio" in page.lower()
+            return True, ("Rdio Scanner found at " if found else "A web server answered at ") + url + \
+                ("." if found else ", but it doesn't look like Rdio Scanner.")
+        except urllib.error.HTTPError as exc:
+            return False, f"{url} answered with error {exc.code}."
+        except (OSError, ValueError) as exc:
+            return False, f"Can't reach {url}: {exc}"
+
+
+class RdioDialog(QDialog):
+    """Tools → Send Calls to Rdio Scanner…"""
+
+    def __init__(self, monitor):
+        super().__init__(monitor)
+        self.monitor = monitor
+        self.rdio = monitor.rdio
+        self.setWindowTitle("Send Calls to Rdio Scanner")
+        self.resize(680, 640)
+        layout = QVBoxLayout(self)
+        intro = make_label(
+            "Each recorded call (PC audio capture) is sent to your <b>Rdio Scanner</b> server, which plays "
+            "them on your phone or any browser with their system, talkgroup and units. Set up Rdio Scanner "
+            "(free, GPL v3) on this PC or another one, then in its admin page: <b>Options → Auto Populate</b> "
+            "on, and <b>API Keys → new key</b> for all systems. Away from home, reach it through a VPN such "
+            "as Tailscale or WireGuard rather than opening it to the internet.")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self.enabled = QCheckBox("Send recorded calls to Rdio Scanner")
+        self.enabled.setChecked(self.rdio.setting("enabled", "false") == "true")
+        set_css(self.enabled, "font-weight:700;")
+        layout.addWidget(self.enabled)
+        form = QFormLayout()
+        self.url = QLineEdit(self.rdio.setting("url"))
+        self.url.setPlaceholderText("http://127.0.0.1:3000")
+        form.addRow("Server", self.url)
+        self.key = QLineEdit(self.rdio.setting("key"))
+        self.key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.key.setPlaceholderText("API key from Rdio Scanner's admin page")
+        form.addRow("API key", self.key)
+        layout.addLayout(form)
+        layout.addWidget(make_label("System numbers (one per line, <i>name = number</i>). New systems are "
+                                    "numbered as they are heard; with Auto Populate on, Rdio Scanner "
+                                    "creates them. Talkgroups use their TGID, conventional channels "
+                                    "their frequency in kHz."))
+        self.systems = QTextEdit()
+        self.systems.setAcceptRichText(False)
+        self.systems.setPlainText("\n".join(f"{n} = {i}" for n, i in sorted(self.rdio.systems().items(),
+                                                                             key=lambda x: x[1])))
+        layout.addWidget(self.systems, 1)
+        self.state = make_label("")
+        self.state.setWordWrap(True)
+        layout.addWidget(self.state)
+        buttons = QHBoxLayout()
+        test = QPushButton("TEST CONNECTION")
+        test.clicked.connect(self.test)
+        save = QPushButton("SAVE")
+        save.clicked.connect(self.save)
+        close = QPushButton("CLOSE")
+        close.clicked.connect(self.accept)
+        buttons.addWidget(test)
+        buttons.addStretch(1)
+        buttons.addWidget(save)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+        self.show_state()
+
+    def show_state(self, extra=""):
+        r = self.rdio
+        text = (f"{r.sent_today} call(s) sent since the Monitor started • {len(r.queue)} waiting"
+                + (" • paused until the API key is changed" if r.paused else "") + f"<br>{r.last_text}")
+        set_text(self.state, (extra + "<br>" if extra else "") + text)
+        set_css(self.state, "color:#7ee3a5;" if r.last_ok and not extra.startswith("✗") else "color:#ffb3a7;")
+
+    def parse_systems(self):
+        systems = {}
+        for line in self.systems.toPlainText().splitlines():
+            name, sep, number = line.rpartition("=")
+            if sep and name.strip() and number.strip().isdigit():
+                systems[name.strip()] = int(number.strip())
+        return systems
+
+    def save(self):
+        s = self.monitor.settings
+        s.setValue("rdio/enabled", "true" if self.enabled.isChecked() else "false")
+        s.setValue("rdio/url", self.url.text().strip())
+        s.setValue("rdio/key", self.key.text().strip())
+        s.setValue("rdio/systems", json.dumps(self.parse_systems()))
+        self.rdio.settings_changed()
+        self.show_state("✓ Saved.")
+
+    def test(self):
+        self.save()
+        ok, text = self.rdio.test()
+        self.show_state(("✓ " if ok else "✗ ") + text)
+
+
 class Monitor(QMainWindow):
     # Re-emits every reply from whichever serial thread is current.
     scanner_output = pyqtSignal(str)
@@ -19148,6 +19467,7 @@ class Monitor(QMainWindow):
         self.ten_codes = TenCodeBook(self)
         self.ten_codes_window = None
         self.adsb = AdsbFeed(self)
+        self.rdio = RdioUploader(self)
         self.aircraft_window = None
         self.menu_parts = []              # a long scanner menu arrives in parts (v1.1.59)
         self.menu_parts_timer = None
@@ -19679,6 +19999,7 @@ class Monitor(QMainWindow):
         tools_menu.addAction("Activity Watch…",
                              lambda: self.open_analysis("activity_window", ActivityWatchWindow))
         tools_menu.addAction("Phone Alerts…", lambda: PhoneSettingsDialog(self).exec())
+        tools_menu.addAction("Send Calls to Rdio Scanner…", lambda: RdioDialog(self).exec())
         tools_menu.addSeparator()
         tools_menu.addAction("GPS…", lambda: GpsSettingsDialog(self).exec())
         tools_menu.addAction("Places and Map…", lambda: self.open_analysis("places_window", PlacesWindow))
@@ -20617,6 +20938,7 @@ class Monitor(QMainWindow):
         self.transcriber.new_recording(row)
         if self.transcription_window is not None:
             self.transcription_window.update_status()
+        self.rdio.call_saved(path, row)
 
     # ---- Transcription (v1.1.28) ------------------------------------------
     # ---- Analysis windows (v1.1.31) ---------------------------------------
