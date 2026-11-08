@@ -1,6 +1,6 @@
 # SDS100 Monitor User Manual
 
-Version 1.1.65 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
+Version 1.1.78 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
 
 Use the outline button (☰) at the top right of this file to jump to a chapter.
 
@@ -296,6 +296,23 @@ Right-click the status line or any value to:
 
 Right-click a unit for **Name This Unit…** and the other unit actions (chapter 11).
 
+#### Customizing the panel
+
+**View → Customize Scanner Information…** (also on the panel's right-click menu) chooses which lines the panel shows, in what order, with what label, and in what colour, background, size and weight. Besides the fields above you can add:
+
+- service type, modulation and system type;
+- the Favorites List the scanner is playing from (or Full Database), and its quick key and number tag;
+- the system, department, site and channel quick keys and number tags;
+- P25 status (NAC, colour code, RAN), hold, avoid, attenuator, scanner recording, volume, squelch and signal bars;
+- reception start time, reception length and a clock;
+- **Custom text** lines that combine fields, for example `{System} › {Department}`.
+
+**Conditional colours** change a line, or the whole panel, when a field matches: for example *Service type contains Fire → that line white on red*. Rules are checked in order and later ones win. Layouts can be saved as presets (for example *Large print*, *Night*). **Apply** previews; **Cancel** puts the panel back. The layout is kept in `~/SDS100Monitor/info_panel.json`.
+
+#### Out-of-date warning
+
+With SDS-Manager installed (chapter 7, *Working with SDS-Manager*), a yellow warning appears above the panel when the scanner and SDS-Manager seem out of step: SDS-Manager has saved changes not yet exported to the scanner, or the scanner is playing a Favorites List that SDS-Manager's open configuration doesn't have. Click the warning to hide it until it changes.
+
 ### What counts as a reception
 
 A **reception** is one transmission: it starts when the scanner stops on a channel or talkgroup, and ends when the channel or talkgroup changes or the signal goes. Its end is estimated as one polling interval after it was last seen.
@@ -375,6 +392,8 @@ Hold, avoid and next/previous aren't available during search, Close Call and Dis
 #### Go to number tag
 
 Enter the **favorites list**, **system** and **channel** number tags and press **GO** (`JNT`), just like entering a number tag on the scanner. Leave a tag as — to send it blank; if the scanner refuses, fill in all three. The last tags you used are remembered.
+
+A number tag is not a quick key: a number tag jumps straight to a list, system or channel, while a quick key switches scanning on and off. Favorites list quick key 1 is not number tag 1, and nothing has a number tag until you set one. **QUICK KEYS…** opens Scanner Tools on the Quick Keys tab. With SDS-Manager installed, a list of everything that has number tags in its configuration ("1/2/120 — PD Dispatch (Lakeside)") fills in the three numbers for you.
 
 #### Audio
 
@@ -474,7 +493,7 @@ The window reopens at start-up if it was open when you quit. If the scanner refu
 
 ## 7. Scanner Tools
 
-**View → Scanner Tools…** (or **Tools → Scanner → Scanner Tools…**) opens a window with five tabs.
+**View → Scanner Tools…** (or **Tools → Scanner → Scanner Tools…**) opens a window with six tabs.
 
 ### Lists
 
@@ -492,9 +511,20 @@ Right-click any system, department, site, channel or talkgroup to:
 
 This works for any item in the lists, not just the one on screen. The avoid column shows each item's current state, and the list refreshes after a change.
 
+### Avoids
+
+All the avoids in one place. **READ AVOIDS** reads every system, site, department, channel and talkgroup in the scanner's Favorites Lists and shows them in one table: their avoid state (Off, **Temporary** in orange, **Permanent** in red), type, name, and where they are (list › system › department).
+
+- **Avoided only**, the type boxes (Systems, Sites, Departments, Channels, Talkgroups) and **Find…** narrow the table.
+- Select one or more rows (Ctrl+click, Shift+click) and press **TEMPORARY AVOID**, **PERMANENT AVOID…** or **REMOVE AVOID**, or right-click them. **REMOVE ALL TEMPORARY AVOIDS…** clears every temporary avoid.
+- Reading every channel takes one request per department. Untick **Include channels and talkgroups** for a quick read of systems, sites and departments only; **STOP** ends a long read.
+- You are asked before a permanent avoid and before changing more than 10 items at once. Temporary avoids end when the scanner is turned off; permanent ones are stored on the scanner (SDS-Manager 0.1.21 or later keeps them when it next exports).
+
 ### Quick Keys
 
-Favorites list, system and department **quick keys** are shown as 10 × 10 grids: green means enabled, grey disabled, and blank not assigned. Click a key to turn it on or off. Choose which favorites list and system the lower grids show. Favorites list names appear in tooltips once the Lists tab has loaded them.
+Favorites list, system and department **quick keys** are shown as grids of buttons: green means On (scanned), grey Off. Click a key to turn it on or off. Choose which favorites list and system the lower grids show. Each button shows what the key switches, for example "00 Greenville County"; **Only keys in use** (on by default) hides the empty ones. Favorites list names come from the scanner; system, department and site names come from SDS-Manager, when it's installed (sites are marked "(site)", because a trunked site uses its system's department keys).
+
+**Scan profiles:** choose a profile saved in SDS-Manager (Favorites → Keys & Tags) and press **APPLY PROFILE TO SCANNER**. The Monitor reads each set of quick keys, changes only the ones that differ, and reads back.
 
 ![Scanner Tools → Quick Keys.](images/tools-quick-keys.png)
 
@@ -539,6 +569,16 @@ Quick ways to add a rule:
 - right-click a call in Transcription → **Alert When Transcript Contains…**.
 
 Unit rules with "is exactly" match on the unit number, so they keep working after you name the unit. To send alerts to your phone as well, see Phone Alerts in chapter 12.
+
+### Working with SDS-Manager
+
+SDS-Manager is a separate program for the scanner's Favorites Lists and settings. When both are installed:
+
+- right-click a reception, or the Scanner Information panel, for **Edit in Manager…** (opens that channel or talkgroup in SDS-Manager) and **Add to Favorites List in Manager…** (adds what you heard to a list of your choice). The same two are in **Tools**. Requests go only to SDS-Manager on this computer;
+- quick key names, number tags and scan profiles come from SDS-Manager, and reload by themselves when it saves;
+- the Scanner Information panel warns when the scanner is out of date (chapter 5).
+
+The Monitor only reads SDS-Manager's shared file (`~/.local/share/sds100-database-favorites-manager/monitor-keys.json`); it never changes SDS-Manager's configurations itself.
 
 ## 8. Waterfall
 

@@ -2,6 +2,86 @@
 
 Newest first. Versions before 1.1.47 were tested by hand on a real SDS100; from 1.1.47 on, every version also passes the automated tests.
 
+## v1.1.78: Site quick keys
+
+- **New: "Site quick key" for the Scanner Information panel** (View → Customize Scanner Information…): the quick key of the trunked site being scanned, as the scanner reports it. A site's key is one of its system's department keys (SDS-Manager 0.1.22 sets them).
+- **Hold** in the panel now includes a site hold.
+- Department quick key names from SDS-Manager 0.1.22 include sites, marked "(site)", in Scanner Tools → Quick Keys (no change needed here for that).
+- New test checks.
+
+## v1.1.77: Avoids in Scanner Tools
+
+- **New: Scanner Tools → Avoids tab.** READ AVOIDS reads every system, site, department, channel and talkgroup in the scanner's Favorites Lists and shows them in one table with their avoid state (Off, Temporary in orange, Permanent in red) and where they are (list › system › department).
+  - Show only avoided items, only some kinds (systems, sites, departments, channels, talkgroups), or find by name.
+  - Select one or many rows (Ctrl/Shift+click) and use TEMPORARY AVOID, PERMANENT AVOID… or REMOVE AVOID (also on right-click). REMOVE ALL TEMPORARY AVOIDS… clears them in one go.
+  - Untick "Include channels and talkgroups" for a quick read of systems, sites and departments only; STOP ends a long read.
+  - You are asked before a permanent avoid and before changing more than 10 items at once. SDS-Manager 0.1.21 or later keeps permanent avoids at the next Export to Scanner.
+- New tests (3).
+
+## v1.1.76: SDS-Manager link in both editions
+
+- **Edit in Manager…** and **Add to Favorites List in Manager…** (right-click a reception or the Scanner Information panel, and in Tools) are now in the public edition too. They need SDS-Manager installed (the sds-manager package); the request goes only to SDS-Manager on this computer.
+- New: the public edition's tests cover the link (they were personal-only).
+
+## v1.1.75: Permanent avoids survive SDS-Manager's export
+
+- A permanent avoid (or removing one) in Scanner Tools → Favorites now says that SDS-Manager 0.1.21 or later will offer to keep it in your configuration at the next Export to Scanner. Before, exporting a configuration saved earlier quietly undid avoids made on the scanner or from the Monitor.
+
+## v1.1.74: Warns when the scanner is out of date
+
+- **New: a yellow warning above the Scanner Information panel** when the scanner and SDS-Manager seem out of step:
+  - SDS-Manager (0.1.20 or later) has saved changes that haven't been exported to the scanner yet; or
+  - the scanner is playing a Favorites List that isn't in the configuration SDS-Manager has open (the scanner may have a different configuration).
+- Click the warning to hide it until it changes. It updates by itself when SDS-Manager saves or exports, and when the scanner moves to another Favorites List. Nothing is sent to the scanner.
+- New tests (3).
+
+## v1.1.73: Add what you hear to a Favorites List; names refresh by themselves
+
+- **SDS-Manager's names, number tags and scan profiles reload by themselves** when SDS-Manager saves them: the Go to Number Tag list and Scanner Tools → Quick Keys update without pressing ↻ or RELOAD NAMES.
+- Version notes in the program's comments show the version each feature came in again (a version-number update had changed them all).
+
+## v1.1.72: Favorites List in the Scanner Information panel
+
+- **New fields for the panel:** Favorites List (the list the scanner is playing from, or Full Database), Favorites List quick key and Favorites List number tag, read from the scanner's status messages (MonitorList, Remote Command Specification v2.00). Add them with View → Customize Scanner Information… → Add Line, use them in custom text as `{Favorites List}`, or in conditional colours (for example "Favorites List is Greenville County → blue").
+
+## v1.1.71: Customize the Scanner Information panel
+
+- **New: View → Customize Scanner Information…** (also on the panel's right-click menu). Choose which lines the panel shows and in what order, rename their labels or hide them, and give each line its own text colour, background, size (50–300 %) and bold. The whole panel can have its own background.
+- **More to choose from.** Besides System, Site, Department, Channel, Frequency, Talkgroup, Unit ID, Mode and RSSI, there are:
+  - Service type, modulation and system type;
+  - the system, department and channel quick keys and number tags;
+  - P25 status (NAC, colour code, RAN), hold, avoid, attenuator, scanner recording, volume, squelch and signal bars;
+  - reception start time, reception length and a clock;
+  - **Custom text** lines that combine fields, for example `{System} › {Department}`.
+- **Conditional colours:** rules such as "Service type contains Fire → that line white on red" or "Recording is On → whole panel amber". Conditions: contains, is, is not, starts with, is empty, is not empty, number ≥, number ≤. Rules are checked in order, and later ones win.
+- **Presets:** save layouts by name (for example Large print, Night), load them, or go back to the default layout. **Apply** previews the layout on the panel; **Cancel** puts it back as it was.
+- Saved in `~/SDS100Monitor/info_panel.json`. Without it, the panel looks exactly as before.
+- Built on 1.1.69 (1.1.70 was set aside). 8 new tests.
+
+## v1.1.69: Readable quick key names
+
+- **Fixed:** in Scanner Tools → Quick Keys, the "In favorites list quick key" and "In system quick key" dropdowns were too narrow to read. They are now wide enough for the names and show the key as two digits ("00 — Greenville County").
+- **Fixed:** long names on the quick key buttons ran off both edges ("Spartanburg County" showed as ")1 Spartanburg Count"). The buttons are wider, four to a row, and a name that still doesn't fit ends in "…". The full name is in the button's tooltip.
+
+## v1.1.68: Quick keys with names, number tags to pick, scan profiles
+
+- **Quick keys show names.** Scanner Tools → Quick Keys labels each key with what it switches, for example "00 Greenville County". List names come from the scanner; system and department names come from SDS-Manager. **Only keys in use** (on by default) hides the empty ones. Green = On (scanned), grey = Off.
+- **Scan profiles on the scanner.** Choose a profile saved in SDS-Manager (Favorites → Keys & Tags) and press **APPLY PROFILE TO SCANNER**. The Monitor reads each set of quick keys, then changes only the keys that differ, and reads back. Systems and departments are reached through their list and system quick keys, so items without a quick key are left alone. A list's Monitor setting can't be switched remotely.
+- **Go to Number Tag** has a list of everything that has number tags in SDS-Manager's configuration ("1/2/120 — PD Dispatch (Lakeside)"). Choosing one fills in the three numbers.
+- These come from a file SDS-Manager 0.1.12 or later writes when its configuration is saved; the Monitor only reads it. **RELOAD NAMES** and ↻ read it again. The names match the scanner once that configuration has been exported.
+- 6 new tests.
+
+## v1.1.67: Number tags aren't quick keys
+
+- **Go to Number Tag explains the difference.** A number tag is a number you give a favorites list, system or channel to jump straight to it; a quick key turns scanning on and off. They are separate settings: favorites list quick key 1 is not number tag 1, and lists have no number tags until you set them. The panel says so, and when the scanner refuses a number tag (ERR) the message says what to check.
+- **New QUICK KEYS… button** in the panel opens Scanner Tools on the Quick Keys tab.
+- 2 new tests.
+
+## v1.1.66: Internal changes
+
+- No visible change in this edition.
+
+
 ## v1.1.65: Custom Search banks 0–9, with On / Off
 
 - **Fixed (1.1.64):** Custom Search numbered the banks 1–10, so **TURN BANK ON / OFF** pressed the wrong number key. Banks are now 0–9, as on the scanner, and each bank's key is its own number.

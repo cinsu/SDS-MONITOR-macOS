@@ -34,7 +34,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.1.65"
+VERSION = "1.1.78"
 
 # Qt 6.10's new PipeWire audio backend can crash the program while it lists audio devices at
 # start (segmentation fault inside PipeWire, seen with Qt 6.10.2 / PipeWire 1.6.2; it also prints
@@ -444,6 +444,83 @@ def selected_record(table, point):
     return [table.item(row, c).text() if table.item(row, c) else "" for c in range(table.columnCount())]
 
 
+# ---- Edit in Manager (v1.1.52; in both editions since 1.1.76) ---------------------------------
+#
+# Right-click a reception (or Tools → Edit Current Channel in Manager…) to open SDS100 Database &
+# Favorites Manager's list editor on that talkgroup or channel. The request goes to a running
+# Manager over a local socket on this computer (named per user); otherwise the newest installed
+# Manager is started with --open-entry. Only names and IDs are sent; nothing is written here.
+
+MANAGER_SERVER = f"sds100-database-favorites-manager-{os.getuid()}"
+
+
+def manager_request(values):
+    """What the Manager needs to find an entry, from reception values (System, Department, …)."""
+    def clean(key):
+        value = str(values.get(key, "") or "").strip()
+        return "" if value == "\u2014" else value
+    return {"system": clean("System"), "department": clean("Department"), "channel": clean("Channel"),
+            "frequency": clean("Frequency"), "tgid": plain_id(clean("Talkgroup"), ("TGID",))}
+
+
+def add_request(values):
+    """Ask SDS-Manager to add what was heard to a Favorites List (1.1.73). Modulation when known."""
+    request = manager_request(values)
+    request["action"] = "add"
+    modulation = str(values.get("Modulation", "") or "").strip().upper()
+    request["modulation"] = modulation if modulation in ("FM", "NFM", "AM") else "AUTO"
+    return request
+
+
+def manager_version_key(name):
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)([a-z]?)", name)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)) if m else (0, 0, 0, "")
+
+
+def newest_manager_launcher(home=None):
+    """launch.sh of the newest installed Manager (~/SDS100DatabaseFavoritesManager-<version>), or None."""
+    if home is None:
+        for command in ("/usr/bin/sds-manager", "/usr/bin/sds100-manager"):
+            if Path(command).is_file():
+                return Path(command)                # SDS-Manager's .deb (0.1.0 and later), or the older name
+    home = Path(home or Path.home())
+    installs = [p for p in home.glob("SDS100DatabaseFavoritesManager-*")
+                if p.is_dir() and not p.is_symlink() and (p / "launch.sh").is_file()]
+    if not installs:
+        return None
+    return max(installs, key=lambda p: manager_version_key(p.name)) / "launch.sh"
+
+
+def edit_in_manager(request, parent=None):
+    """Send the request to the Manager (starting it if needed). Returns a status line."""
+    if not (request.get("tgid") or request.get("frequency")):
+        return ("Nothing to add: this reception has no talkgroup or frequency." if request.get("action") == "add"
+                else "Nothing to look up: this reception has no talkgroup or frequency.")
+    from PyQt6.QtNetwork import QLocalSocket
+    socket = QLocalSocket()
+    socket.connectToServer(MANAGER_SERVER)
+    if socket.waitForConnected(500):
+        socket.write((json.dumps(request) + "\n").encode("utf-8"))
+        socket.flush()
+        socket.waitForBytesWritten(1000)
+        socket.waitForReadyRead(1500)
+        socket.disconnectFromServer()
+        return "Sent to SDS-Manager."
+    launcher = newest_manager_launcher()
+    if launcher is None:
+        QMessageBox.information(parent, "Edit in Manager",
+                                "SDS-Manager isn't installed (its package, sds-manager or "
+                                "sds-manager-personal).")
+        return "Manager not installed."
+    try:
+        subprocess.Popen(["/bin/bash", str(launcher), "--open-entry", json.dumps(request)],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError as exc:
+        QMessageBox.warning(parent, "Edit in Manager", f"Couldn't start the Manager: {exc}")
+        return "Manager not started."
+    where = "installed package" if str(launcher).startswith("/usr/") else launcher.parent.name
+    return f"Starting the Manager ({where})…"
 
 
 def add_copy_actions(menu, row):
@@ -452,6 +529,11 @@ def add_copy_actions(menu, row):
                        ("Copy Talkgroup", 7)):
         menu.addAction(title, lambda checked=False, v=row[idx]: copy_text(v))
     menu.addAction("Copy Entire Record", lambda: copy_text("\t".join(row)))
+    if len(row) >= len(HEADERS):
+        menu.addSeparator()
+        menu.addAction("Edit in Manager…", lambda: edit_in_manager(manager_request(dict(zip(HEADERS, row)))))
+        menu.addAction("Add to Favorites List in Manager…",
+                       lambda: edit_in_manager(add_request(dict(zip(HEADERS, row)))))
 
 
 class HistoryArchiveBrowser(QDialog):
@@ -1023,6 +1105,505 @@ class KeyProtocolDiagnostic(QDialog):
         super().closeEvent(event)
 
 
+# ---- Scanner Information panel: your choice of lines, colours and conditional colours (1.1.71) --------------
+# Every field the panel can show, with its label. The first nine are the panel as it was before.
+INFO_FIELDS = {
+    "System": "System", "Site": "Site", "Department": "Department", "Channel": "Channel",
+    "Frequency": "Frequency", "Talkgroup": "Talkgroup", "Unit ID": "Unit ID", "Mode": "Mode", "RSSI": "RSSI",
+    "Favorites List": "Favorites List", "Favorites List Quick Key": "Favorites List quick key",
+    "Favorites List Number Tag": "Favorites List number tag",
+    "Service Type": "Service type", "Modulation": "Modulation", "System Type": "System type",
+    "System Quick Key": "System quick key", "System Number Tag": "System number tag",
+    "Department Quick Key": "Department quick key", "Site Quick Key": "Site quick key (department set)",
+    "Channel Number Tag": "Channel number tag",
+    "P25 Status": "P25 status (NAC / colour code / RAN)", "Hold": "Hold", "Avoid": "Avoid",
+    "Attenuator": "Attenuator", "Recording": "Recording (scanner)", "Volume": "Volume", "Squelch": "Squelch",
+    "Signal Bars": "Signal bars (scanner)", "Reception Start": "Reception started", "Duration": "Reception length",
+    "Clock": "Clock", "Custom": "Custom text…",
+}
+DEFAULT_INFO_FIELDS = ("System", "Site", "Department", "Channel", "Frequency", "Talkgroup", "Unit ID", "Mode",
+                       "RSSI")
+INFO_OPS = ("contains", "is", "is not", "starts with", "is empty", "is not empty", "number ≥", "number ≤")
+INFO_LAYOUT_FILE = DATA_DIR / "info_panel.json"
+_HEX = re.compile(r"#[0-9a-fA-F]{6}")
+
+
+def default_info_line(field):
+    return {"field": field, "label": INFO_FIELDS.get(field, field).upper() if field != "Custom" else "",
+            "show_label": True, "template": "{System} › {Department}" if field == "Custom" else "",
+            "fg": "", "bg": "", "size": 100, "bold": False}
+
+
+def default_info_layout():
+    return {"lines": [default_info_line(f) for f in DEFAULT_INFO_FIELDS], "panel_bg": "", "rules": []}
+
+
+def _colour(value):
+    return value if isinstance(value, str) and _HEX.fullmatch(value) else ""
+
+
+def clean_info_layout(data):
+    """A layout with only known fields and sane values (anything odd falls back to the default)."""
+    if not isinstance(data, dict) or not isinstance(data.get("lines"), list):
+        return default_info_layout()
+    lines = []
+    for line in data["lines"]:
+        if not isinstance(line, dict) or line.get("field") not in INFO_FIELDS:
+            continue
+        clean = default_info_line(line["field"])
+        clean["label"] = str(line.get("label", clean["label"]))[:40]
+        clean["show_label"] = bool(line.get("show_label", True))
+        clean["template"] = str(line.get("template", clean["template"]))[:200]
+        clean["fg"], clean["bg"] = _colour(line.get("fg")), _colour(line.get("bg"))
+        try:
+            clean["size"] = max(50, min(300, int(line.get("size", 100))))
+        except (TypeError, ValueError):
+            pass
+        clean["bold"] = bool(line.get("bold", False))
+        lines.append(clean)
+    rules = []
+    for rule in data.get("rules", []) if isinstance(data.get("rules"), list) else []:
+        if isinstance(rule, dict) and rule.get("field") in INFO_FIELDS and rule.get("op") in INFO_OPS:
+            rules.append({"field": rule["field"], "op": rule["op"], "value": str(rule.get("value", ""))[:100],
+                          "target": "panel" if rule.get("target") == "panel" else "line",
+                          "fg": _colour(rule.get("fg")), "bg": _colour(rule.get("bg"))})
+    return {"lines": lines or default_info_layout()["lines"], "panel_bg": _colour(data.get("panel_bg")),
+            "rules": rules}
+
+
+def load_info_settings(path=None):
+    """{'current': layout, 'presets': {name: layout}} from the saved file (defaults if none)."""
+    try:
+        data = json.loads(Path(path or INFO_LAYOUT_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    presets = data.get("presets") if isinstance(data, dict) and isinstance(data.get("presets"), dict) else {}
+    return {"current": clean_info_layout(data.get("current")) if isinstance(data, dict) else default_info_layout(),
+            "presets": {str(k)[:40]: clean_info_layout(v) for k, v in presets.items()}}
+
+
+def save_info_settings(settings, path=None):
+    path = Path(path or INFO_LAYOUT_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(settings, indent=1), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def info_text(line, values):
+    """What a line shows: its field's value, or a Custom line's template filled in ({System} etc.)."""
+    if line["field"] != "Custom":
+        return values.get(line["field"], "—") or "—"
+    def fill(match):
+        return values.get(match.group(1), match.group(0)) or "—"
+    return re.sub(r"\{([A-Za-z0-9 ]+)\}", fill, line.get("template", "")) or "—"
+
+
+def rule_matches(rule, values):
+    value = str(values.get(rule["field"], "") or "").strip()
+    empty = value in ("", "—", "None")
+    wanted = rule.get("value", "").strip()
+    op = rule["op"]
+    if op == "is empty":
+        return empty
+    if op == "is not empty":
+        return not empty
+    if empty:
+        return False
+    low, want = value.casefold(), wanted.casefold()
+    if op == "contains":
+        return bool(want) and want in low
+    if op == "is":
+        return low == want
+    if op == "is not":
+        return low != want
+    if op == "starts with":
+        return bool(want) and low.startswith(want)
+    match = re.search(r"-?\d+(?:\.\d+)?", value)
+    try:
+        number, limit = float(match.group(0)) if match else None, float(wanted)
+    except ValueError:
+        return False
+    if number is None:
+        return False
+    return number >= limit if op == "number ≥" else number <= limit
+
+
+def info_styles(layout, values):
+    """(panel background, [(fg, bg) per line]) after the conditional colours: later rules win."""
+    panel = layout.get("panel_bg", "")
+    styles = [[line["fg"], line["bg"]] for line in layout["lines"]]
+    for rule in layout.get("rules", []):
+        if not rule_matches(rule, values):
+            continue
+        if rule["target"] == "panel":
+            panel = rule["bg"] or panel
+            for style in styles:
+                style[0] = rule["fg"] or style[0]
+        else:
+            for line, style in zip(layout["lines"], styles):
+                if line["field"] == rule["field"] or (line["field"] == "Custom"
+                                                      and "{" + rule["field"] + "}" in line["template"]):
+                    style[0] = rule["fg"] or style[0]
+                    style[1] = rule["bg"] or style[1]
+    return panel, [tuple(s) for s in styles]
+
+
+def info_line_css(fg, bg, bold):
+    parts = []
+    if fg:
+        parts.append(f"color:{fg};")
+    if bg:
+        parts.append(f"background:{bg}; border-radius:4px; padding:1px 6px;")
+    if bold:
+        parts.append("font-weight:bold;")
+    return " ".join(parts)
+
+
+def gsi_extras(root, system, department, channel, prop):
+    """The extra fields the scanner reports in a status update (GSI)."""
+    def attr(node, name):
+        value = node.attrib.get(name, "") if node is not None else ""
+        return value if value not in ("", "None") else "—"
+    site = root.find("Site") if root is not None else None       # trunked site (1.1.78)
+    hold = next((attr(n, "Hold") for n in (channel, department, site, system) if attr(n, "Hold") == "On"), "—")
+    if hold == "—" and any(attr(n, "Hold") == "Off" for n in (channel, department, site, system)):
+        hold = "Off"
+    monitored = root.find("MonitorList") if root is not None else None
+    list_type = attr(monitored, "ListType")
+    list_name = attr(monitored, "Name")
+    if list_type == "FullDb" and list_name == "—":
+        list_name = "Full Database"
+    return {
+        # 1.1.72: the list the scanner is playing from (Favorites List, Full Database or a search list).
+        "Favorites List": list_name, "Favorites List Quick Key": attr(monitored, "Q_Key"),
+        "Favorites List Number Tag": attr(monitored, "N_Tag"),
+        "Service Type": attr(channel, "SvcType"), "Modulation": attr(channel, "Mod"),
+        "System Type": attr(system, "SystemType"), "System Quick Key": attr(system, "Q_Key"),
+        "System Number Tag": attr(system, "N_Tag"), "Department Quick Key": attr(department, "Q_Key"),
+        "Site Quick Key": attr(site, "Q_Key"),
+        "Channel Number Tag": attr(channel, "N_Tag"), "P25 Status": attr(prop, "P25Status"),
+        "Hold": hold, "Avoid": attr(channel, "Avoid"), "Attenuator": attr(prop, "Att"),
+        "Recording": attr(prop, "Rec"), "Volume": attr(prop, "VOL"), "Squelch": attr(prop, "SQL"),
+        "Signal Bars": attr(prop, "Sig"),
+    }
+
+
+class InfoPanelDialog(QDialog):
+    """View → Customize Scanner Information…: lines, colours, conditional colours and presets."""
+
+    def __init__(self, parent, settings, apply):
+        super().__init__(parent)
+        self.setWindowTitle("Customize Scanner Information")
+        self.resize(980, 640)
+        if not isinstance(settings, dict) or "current" not in settings:
+            settings = load_info_settings()
+        if not callable(apply):
+            apply = lambda _layout: None
+        self.settings = json.loads(json.dumps(settings))
+        self.original = json.loads(json.dumps(settings["current"]))
+        self.layout_data = json.loads(json.dumps(settings["current"]))
+        self.apply_live = apply
+        self._loading = False
+        outer = QVBoxLayout(self)
+        tabs = QTabWidget()
+        outer.addWidget(tabs, 1)
+        # -- lines --
+        lines_page = QWidget()
+        row = QHBoxLayout(lines_page)
+        left = QVBoxLayout()
+        self.line_list = QListWidget()
+        self.line_list.currentRowChanged.connect(self.show_line)
+        left.addWidget(self.line_list, 1)
+        adder = QHBoxLayout()
+        self.add_choice = QComboBox()
+        for key, label in INFO_FIELDS.items():
+            self.add_choice.addItem(label, key)
+        adder.addWidget(self.add_choice, 1)
+        add = QPushButton("Add Line")
+        add.clicked.connect(self.add_line)
+        adder.addWidget(add)
+        left.addLayout(adder)
+        moves = QHBoxLayout()
+        for text, slot in (("Up", lambda: self.move_line(-1)), ("Down", lambda: self.move_line(1)),
+                           ("Remove", self.remove_line)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            moves.addWidget(b)
+        left.addLayout(moves)
+        row.addLayout(left, 1)
+        form_box = QGroupBox("Selected line")
+        form = QFormLayout(form_box)
+        self.label_edit = QLineEdit()
+        self.label_edit.textEdited.connect(lambda t: self.set_line("label", t))
+        form.addRow("Label", self.label_edit)
+        self.show_label = QCheckBox("Show the label")
+        self.show_label.toggled.connect(lambda on: self.set_line("show_label", on))
+        form.addRow("", self.show_label)
+        self.template_edit = QLineEdit()
+        self.template_edit.setToolTip("Field names in braces, for example {System} › {Department} — {Talkgroup}")
+        self.template_edit.textEdited.connect(lambda t: self.set_line("template", t))
+        form.addRow("Custom text", self.template_edit)
+        self.fg_button = QPushButton("Text colour…")
+        self.fg_button.clicked.connect(lambda: self.pick_line_colour("fg"))
+        self.bg_button = QPushButton("Background…")
+        self.bg_button.clicked.connect(lambda: self.pick_line_colour("bg"))
+        colours = QHBoxLayout()
+        colours.addWidget(self.fg_button)
+        colours.addWidget(self.bg_button)
+        clear = QPushButton("Theme colours")
+        clear.setToolTip("Use the theme's colours for this line")
+        clear.clicked.connect(self.clear_line_colours)
+        colours.addWidget(clear)
+        form.addRow("Colours", colours)
+        self.size_spin = QSpinBox()
+        self.size_spin.setRange(50, 300)
+        self.size_spin.setSuffix(" %")
+        self.size_spin.valueChanged.connect(lambda v: self.set_line("size", v))
+        form.addRow("Size", self.size_spin)
+        self.bold = QCheckBox("Bold")
+        self.bold.toggled.connect(lambda on: self.set_line("bold", on))
+        form.addRow("", self.bold)
+        self.panel_bg = QPushButton("Panel background…")
+        self.panel_bg.clicked.connect(self.pick_panel_colour)
+        panel_clear = QPushButton("Theme background")
+        panel_clear.clicked.connect(lambda: self.set_panel(""))
+        panel_row = QHBoxLayout()
+        panel_row.addWidget(self.panel_bg)
+        panel_row.addWidget(panel_clear)
+        form.addRow("Whole panel", panel_row)
+        row.addWidget(form_box, 1)
+        tabs.addTab(lines_page, "Lines")
+        # -- conditional colours --
+        rules_page = QWidget()
+        rules_layout = QVBoxLayout(rules_page)
+        rules_layout.addWidget(make_label(
+            "Colour a line, or the whole panel, when a field matches. Rules are checked top to bottom; later "
+            "ones win. Example: Service Type contains Fire → this line red."))
+        self.rule_table = QTableWidget(0, 6)
+        self.rule_table.setHorizontalHeaderLabels(["When", "Condition", "Value", "Colour", "Text", "Background"])
+        self.rule_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        rules_layout.addWidget(self.rule_table, 1)
+        rule_buttons = QHBoxLayout()
+        for text, slot in (("Add Rule", self.add_rule), ("Remove Rule", self.remove_rule)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            rule_buttons.addWidget(b)
+        rule_buttons.addStretch(1)
+        rules_layout.addLayout(rule_buttons)
+        tabs.addTab(rules_page, "Conditional Colours")
+        # -- presets --
+        bottom = QHBoxLayout()
+        bottom.addWidget(make_label("Preset:"))
+        self.preset_choice = QComboBox()
+        self.preset_choice.setMinimumWidth(180)
+        bottom.addWidget(self.preset_choice)
+        for text, slot in (("Load", self.load_preset), ("Save as Preset…", self.save_preset),
+                           ("Delete", self.delete_preset), ("Default Layout", self.reset_default)):
+            b = QPushButton(text)
+            b.clicked.connect(slot)
+            bottom.addWidget(b)
+        bottom.addStretch(1)
+        outer.addLayout(bottom)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Apply
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self.preview)
+        outer.addWidget(buttons)
+        self.fill_presets()
+        self.fill_lines()
+        self.fill_rules()
+
+    # ---- lines --------------------------------------------------------------------------------
+    def fill_lines(self, select=0):
+        self.line_list.clear()
+        for line in self.layout_data["lines"]:
+            name = INFO_FIELDS.get(line["field"], line["field"])
+            if line["field"] == "Custom":
+                name = f"Custom: {line['template']}"
+            self.line_list.addItem(name)
+        if self.layout_data["lines"]:
+            self.line_list.setCurrentRow(max(0, min(select, len(self.layout_data["lines"]) - 1)))
+
+    def current_line(self):
+        index = self.line_list.currentRow()
+        return self.layout_data["lines"][index] if 0 <= index < len(self.layout_data["lines"]) else None
+
+    def show_line(self, _index):
+        line = self.current_line()
+        if line is None:
+            return
+        self._loading = True
+        try:
+            self.label_edit.setText(line["label"])
+            self.show_label.setChecked(line["show_label"])
+            self.template_edit.setText(line["template"])
+            self.template_edit.setEnabled(line["field"] == "Custom")
+            self.size_spin.setValue(line["size"])
+            self.bold.setChecked(line["bold"])
+            self.fg_button.setStyleSheet(f"color:{line['fg']};" if line["fg"] else "")
+            self.bg_button.setStyleSheet(f"background:{line['bg']};" if line["bg"] else "")
+        finally:
+            self._loading = False
+
+    def set_line(self, key, value):
+        line = self.current_line()
+        if line is None or self._loading:
+            return
+        line[key] = value
+        if key == "template":
+            self.line_list.currentItem().setText(f"Custom: {value}")
+
+    def add_line(self):
+        self.layout_data["lines"].append(default_info_line(self.add_choice.currentData()))
+        self.fill_lines(len(self.layout_data["lines"]) - 1)
+
+    def remove_line(self):
+        index = self.line_list.currentRow()
+        if 0 <= index < len(self.layout_data["lines"]) and len(self.layout_data["lines"]) > 1:
+            del self.layout_data["lines"][index]
+            self.fill_lines(index)
+
+    def move_line(self, step):
+        index = self.line_list.currentRow()
+        target = index + step
+        lines = self.layout_data["lines"]
+        if 0 <= index < len(lines) and 0 <= target < len(lines):
+            lines[index], lines[target] = lines[target], lines[index]
+            self.fill_lines(target)
+
+    def pick_colour(self, start):
+        from PyQt6.QtWidgets import QColorDialog
+        from PyQt6.QtGui import QColor
+        colour = QColorDialog.getColor(QColor(start) if start else QColor("#ffffff"), self, "Choose a colour")
+        return colour.name() if colour.isValid() else None
+
+    def pick_line_colour(self, key):
+        line = self.current_line()
+        if line is None:
+            return
+        colour = self.pick_colour(line[key])
+        if colour:
+            line[key] = colour
+            self.show_line(self.line_list.currentRow())
+
+    def clear_line_colours(self):
+        line = self.current_line()
+        if line is not None:
+            line["fg"] = line["bg"] = ""
+            self.show_line(self.line_list.currentRow())
+
+    def pick_panel_colour(self):
+        colour = self.pick_colour(self.layout_data.get("panel_bg", ""))
+        if colour:
+            self.set_panel(colour)
+
+    def set_panel(self, colour):
+        self.layout_data["panel_bg"] = colour
+        self.panel_bg.setStyleSheet(f"background:{colour};" if colour else "")
+
+    # ---- rules -------------------------------------------------------------------------------------
+    def fill_rules(self):
+        self.rule_table.setRowCount(0)
+        for rule in self.layout_data["rules"]:
+            self.add_rule(rule)
+
+    def add_rule(self, rule=None):
+        rule = rule if isinstance(rule, dict) else {"field": "Service Type", "op": "contains", "value": "Fire",
+                                                    "target": "line", "fg": "#ffffff", "bg": "#b3261e"}
+        r = self.rule_table.rowCount()
+        self.rule_table.insertRow(r)
+        field = QComboBox()
+        for key, label in INFO_FIELDS.items():
+            if key != "Custom":
+                field.addItem(label, key)
+        field.setCurrentIndex(max(0, field.findData(rule["field"])))
+        op = QComboBox()
+        op.addItems(INFO_OPS)
+        op.setCurrentText(rule["op"])
+        value = QLineEdit(rule.get("value", ""))
+        target = QComboBox()
+        target.addItem("That line", "line")
+        target.addItem("Whole panel", "panel")
+        target.setCurrentIndex(1 if rule.get("target") == "panel" else 0)
+        self.rule_table.setCellWidget(r, 0, field)
+        self.rule_table.setCellWidget(r, 1, op)
+        self.rule_table.setCellWidget(r, 2, value)
+        self.rule_table.setCellWidget(r, 3, target)
+        for column, key in ((4, "fg"), (5, "bg")):
+            button = QPushButton(rule.get(key) or "Theme")
+            button.setProperty("colour", rule.get(key, ""))
+            button.setStyleSheet(f"background:{rule[key]};" if rule.get(key) else "")
+            button.clicked.connect(lambda _c=False, b=button: self.pick_rule_colour(b))
+            self.rule_table.setCellWidget(r, column, button)
+
+    def pick_rule_colour(self, button):
+        colour = self.pick_colour(button.property("colour") or "")
+        if colour:
+            button.setProperty("colour", colour)
+            button.setText(colour)
+            button.setStyleSheet(f"background:{colour};")
+
+    def remove_rule(self):
+        r = self.rule_table.currentRow()
+        if r < 0:
+            r = self.rule_table.rowCount() - 1
+        if r >= 0:
+            self.rule_table.removeRow(r)
+
+    def read_rules(self):
+        rules = []
+        for r in range(self.rule_table.rowCount()):
+            cells = [self.rule_table.cellWidget(r, c) for c in range(6)]
+            rules.append({"field": cells[0].currentData(), "op": cells[1].currentText(), "value": cells[2].text(),
+                          "target": cells[3].currentData(), "fg": cells[4].property("colour") or "",
+                          "bg": cells[5].property("colour") or ""})
+        return rules
+
+    # ---- presets and results -----------------------------------------------------------------------
+    def fill_presets(self):
+        self.preset_choice.clear()
+        self.preset_choice.addItems(sorted(self.settings["presets"], key=str.casefold))
+
+    def result_layout(self):
+        data = dict(self.layout_data, rules=self.read_rules())
+        return clean_info_layout(data)
+
+    def save_preset(self):
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name (for example Large print, Night):",
+                                        text=self.preset_choice.currentText())
+        name = name.strip()[:40]
+        if ok and name:
+            self.settings["presets"][name] = self.result_layout()
+            self.fill_presets()
+            self.preset_choice.setCurrentText(name)
+
+    def load_preset(self):
+        layout = self.settings["presets"].get(self.preset_choice.currentText())
+        if layout:
+            self.layout_data = json.loads(json.dumps(layout))
+            self.fill_lines()
+            self.fill_rules()
+            self.set_panel(self.layout_data.get("panel_bg", ""))
+
+    def delete_preset(self):
+        self.settings["presets"].pop(self.preset_choice.currentText(), None)
+        self.fill_presets()
+
+    def reset_default(self):
+        self.layout_data = default_info_layout()
+        self.fill_lines()
+        self.fill_rules()
+        self.set_panel("")
+
+    def preview(self):
+        self.apply_live(self.result_layout())
+
+    def result_settings(self):
+        return {"current": self.result_layout(), "presets": self.settings["presets"]}
+
+
 class ResponsiveInfo(QWidget):
     """Scale information text to the available dock width and height."""
     def resizeEvent(self, event):
@@ -1035,7 +1616,9 @@ class ResponsiveInfo(QWidget):
         for label in self.findChildren(QLabel):
             if label.objectName() == "value":
                 font = label.font()
-                font.setPointSize(size)
+                percent = label.property("size_pct") or 100      # per-line size (1.1.71)
+                font.setPointSize(max(6, round(size * percent / 100)))
+                font.setBold(bool(label.property("bold")))
                 label.setFont(font)
 
 
@@ -1303,6 +1886,183 @@ LIST_KINDS = {
 }
 HOLDABLE = ("SYS", "DEPT", "SITE", "CFREQ", "TGID")
 
+# ---- Scanner Tools → Avoids (1.1.77) ---------------------------------------------------------------
+# Reads the whole Favorites tree with GLT (lists → systems → sites and departments → channels and
+# talkgroups) and shows every avoidable item in one table, to avoid or un-avoid many at once with AVD
+# (status 1 permanent, 2 temporary, 3 remove; remote command specification V2.00).
+AVOID_GROUPS = {"SYS": "Systems", "SITE": "Sites", "DEPT": "Departments", "CFREQ": "Channels",
+                "TGID": "Talkgroups"}
+AVOID_STATUS = {1: "Permanent", 2: "Temporary", 3: "Off"}
+
+
+def avoid_state(value):
+    """'Off', 'Temporary' or 'Permanent' from a GLT Avoid attribute."""
+    text = str(value or "").strip()
+    if text.casefold() in ("", "off", "none", "0", "—"):
+        return "Off"
+    if text.upper().startswith("T") or "temp" in text.casefold():
+        return "Temporary"
+    return "Permanent"
+
+
+def avoid_children(kind, sys_type, leaves=True):
+    """GLT lists to read under an item when looking for avoids."""
+    conventional = "conv" in str(sys_type or "").lower()
+    if kind == "FL":
+        return ("SYS",)
+    if kind == "SYS":
+        return ("DEPT",) if conventional else ("DEPT", "SITE")
+    if kind == "DEPT" and leaves:
+        return ("CFREQ",) if conventional else ("TGID",) if sys_type else ("CFREQ", "TGID")
+    return ()
+
+
+def avoid_row(element, where, sys_type):
+    a = element.attrib
+    kind = element.tag
+    name = (a.get("Name") or a.get("Freq") or a.get("TGID") or "(unnamed)").strip()
+    details = {"SYS": a.get("Type", ""), "CFREQ": a.get("Freq", "").strip(), "TGID": f"TGID {a.get('TGID', '')}",
+               "SITE": "", "DEPT": ""}.get(kind, "")
+    return {"kind": kind, "name": name, "where": where, "details": details, "index": a.get("Index", ""),
+            "avoid": avoid_state(a.get("Avoid")), "sys_type": sys_type}
+
+
+def avoid_filter(rows, kinds, avoided_only=True, text=""):
+    text = str(text or "").strip().casefold()
+    return [r for r in rows if r["kind"] in kinds and (not avoided_only or r["avoid"] != "Off")
+            and (not text or text in (r["name"] + " " + r["where"] + " " + r["details"]).casefold())]
+
+
+# ---- names, number tags and scan profiles from SDS-Manager (1.1.68) ---------------------------------
+# SDS-Manager writes this file whenever its open configuration is saved or its scan profiles change. The
+# Monitor only reads it. Names come from the configuration as saved there, so they match the scanner once
+# that configuration has been exported.
+MANAGER_KEYS_FILE = (Path.home() / ".local" / "share" / "sds100-database-favorites-manager"
+                     / "monitor-keys.json")
+
+
+QK_BUTTON_WIDTH = 236          # 1.1.69: wide enough for a county name; longer names end in …
+QK_COLUMNS = 4                 # four across fits the Scanner Tools window
+
+
+def fit_text(widget, text, width):
+    """text shortened with … to fit width pixels in the widget's font (whole text if it fits)."""
+    try:
+        fitted = widget.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, width)
+    except (AttributeError, TypeError):
+        fitted = None
+    return fitted if isinstance(fitted, str) else (text if len(text) <= 22 else text[:21] + "…")
+
+
+def load_manager_keys(path=None):
+    """The Manager's shared keys file as a dict, or {} if there is none (or it can't be read)."""
+    try:
+        data = json.loads(Path(path or MANAGER_KEYS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) and isinstance(data.get("lists"), list) else {}
+
+
+def scanner_sync_warning(data, list_type="", list_name=""):
+    """1.1.74: a line when the scanner and SDS-Manager's configuration seem out of step, else "".
+
+    data is SDS-Manager's shared file (load_manager_keys). Two signs, both only hints:
+      - SDS-Manager saved changes it hasn't exported to the scanner yet (SDS-Manager 0.1.20 or later);
+      - the scanner is playing a Favorites List (GSI MonitorList, ListType FL) that isn't in the
+        configuration SDS-Manager has open."""
+    if not data:
+        return ""
+    config = str(data.get("configuration") or "SDS-Manager's configuration")
+    scanner = data.get("scanner") if isinstance(data.get("scanner"), dict) else {}
+    if scanner.get("state") == "changed":
+        saved = str(scanner.get("saved") or "").replace("T", " ")[:16]
+        return (f"Scanner out of date: {config} has changes saved in SDS-Manager"
+                + (f" ({saved})" if saved else "") + " that aren't on the scanner yet. "
+                "Use Export to Scanner in SDS-Manager.")
+    name = str(list_name or "").strip()
+    if list_type == "FL" and name and name != "—":
+        names = {str(l.get("name") or "").strip().casefold() for l in data.get("lists", [])}
+        if names and name.casefold() not in names:
+            return (f"The scanner is playing Favorites List \"{name}\", which isn't in {config} in "
+                    "SDS-Manager. The scanner may have a different configuration: read it from the scanner "
+                    "in SDS-Manager, or export yours to it.")
+    return ""
+
+
+def manager_list(data, fl_key):
+    return next((l for l in data.get("lists", []) if l.get("key") == fl_key), None)
+
+
+def manager_system(data, fl_key, sys_key):
+    favorites = manager_list(data, fl_key)
+    if favorites is None:
+        return None
+    return next((s for s in favorites.get("systems", []) if s.get("key") == sys_key), None)
+
+
+def manager_key_names(data, code, fl_key=None, sys_key=None):
+    """{quick key: name} for FQK (lists), SQK (systems of the list on fl_key) or DQK (departments of the
+    system on sys_key in that list). Several items on one key are joined with ' + '."""
+    if code == "FQK":
+        items = data.get("lists", [])
+    elif code == "SQK":
+        items = (manager_list(data, fl_key) or {}).get("systems", [])
+    else:
+        items = (manager_system(data, fl_key, sys_key) or {}).get("departments", [])
+    names = {}
+    for item in items:
+        key = item.get("key")
+        if isinstance(key, int):
+            names[key] = names[key] + " + " + item["name"] if key in names else item["name"]
+    return names
+
+
+def manager_tag_choices(data):
+    """[(label, (list tag, system tag, channel tag))] for Go to Number Tag; None = leave blank."""
+    out = []
+    for favorites in data.get("lists", []):
+        lt = favorites.get("tag")
+        if lt is None:
+            continue
+        out.append((f"{lt} — {favorites['name']} (whole list)", (lt, None, None)))
+        for system in favorites.get("systems", []):
+            st = system.get("tag")
+            if st is None:
+                continue
+            out.append((f"{lt}/{st} — {system['name']} ({favorites['name']})", (lt, st, None)))
+            for channel in sorted(system.get("channels", []), key=lambda c: c.get("tag", 0)):
+                out.append((f"{lt}/{st}/{channel['tag']} — {channel['name']} ({system['name']})",
+                            (lt, st, channel["tag"])))
+    return out
+
+
+def profile_steps(data, profile):
+    """Scanner commands to apply a scan profile: [(code, read command, set prefix, wanted On/Off x100)].
+    Systems and departments are reached by their list's and system's quick keys, so items without a
+    quick key are skipped (the scanner can't switch them by key)."""
+    steps = []
+    fl = profile.get("fl")
+    if isinstance(fl, list) and len(fl) == 100:
+        steps.append(("FQK", "FQK", "FQK,", [bool(v) for v in fl]))
+    for favorites in data.get("lists", []):
+        lk = favorites.get("key")
+        if lk is None:
+            continue
+        wanted = profile.get("sys", {}).get(favorites.get("filename"))
+        if isinstance(wanted, list) and len(wanted) == 100:
+            steps.append(("SQK", f"SQK,{lk}", f"SQK,{lk},", [bool(v) for v in wanted]))
+        for system in favorites.get("systems", []):
+            sk = system.get("key")
+            wanted = profile.get("dept", {}).get(f"{favorites.get('filename')}|{system['name']}")
+            if sk is not None and isinstance(wanted, list) and len(wanted) == 100:
+                steps.append(("DQK", f"DQK,{lk},{sk}", f"DQK,{lk},{sk},", [bool(v) for v in wanted]))
+    return steps
+
+
+def merged_quick_keys(current, wanted):
+    """The scanner's 100 statuses (0 none, 1 off, 2 on) with assigned keys set as wanted."""
+    return [st if st not in (1, 2) else (2 if want else 1) for st, want in zip(current, wanted)]
+
 
 class ScannerTools(QWidget):
     """View → Scanner Tools…: lists, quick keys, service types, location, alerts.
@@ -1327,7 +2087,10 @@ class ScannerTools(QWidget):
         layout.addWidget(self.status)
         self.glt_pending = deque()      # (command, parent item) in request order
         self.fl_by_qk = {}              # favorites list quick key -> name
+        self.manager_keys = load_manager_keys()
+        self.profile_run = None         # a scan profile being applied (1.1.68)
         self.build_lists_tab()
+        self.build_avoids_tab()
         self.build_quickkeys_tab()
         self.build_service_tab()
         self.build_location_tab()
@@ -1363,6 +2126,9 @@ class ScannerTools(QWidget):
         self.tabs.addTab(tab, "Lists")
 
     def load_favorites(self):
+        if any(isinstance(p, dict) for _c, p in self.glt_pending):
+            set_text(self.status, "Wait for READ AVOIDS to finish (or press STOP) first.")
+            return
         self.tree.clear()
         self.glt_pending.clear()
         self.request_list("GLT,FL", None)
@@ -1435,6 +2201,11 @@ class ScannerTools(QWidget):
             root = ET.fromstring(xml)
         except ET.ParseError:
             set_text(self.status, f"{command}: the scanner's list could not be read.")
+            if isinstance(parent, dict):
+                self.avoid_scan_step()
+            return
+        if isinstance(parent, dict):            # Avoids tab scan (1.1.77)
+            self.avoids_received(command, parent, root)
             return
         footer = root.find("Footer")
         if parent is not None:
@@ -1464,6 +2235,9 @@ class ScannerTools(QWidget):
             return
         command, parent = self.glt_pending.popleft()
         set_text(self.status, f"{command}: scanner replied {body}.")
+        if isinstance(parent, dict):            # an empty list during an Avoids scan
+            self.avoid_scan_step()
+            return
         if parent is not None and not any(p is parent for _, p in self.glt_pending):
             for i in reversed(range(parent.childCount())):
                 if parent.child(i).data(0, Qt.ItemDataRole.UserRole) is None:
@@ -1516,6 +2290,11 @@ class ScannerTools(QWidget):
             if reply != QMessageBox.StandardButton.Yes:
                 return
         self.list_command(f"AVD,{kind},{index},,{status}", name)
+        if status in (1, 3):
+            # 1.1.75: the scanner keeps a permanent avoid in its Favorites List file; SDS-Manager 0.1.21
+            # offers to keep it in your configuration at the next Export to Scanner instead of undoing it.
+            set_text(self.status, f"Sent AVD for {name}. SDS-Manager (0.1.21 or later) offers to keep "
+                                  "this in your configuration at the next Export to Scanner.")
         parent = item.parent()
         QTimer.singleShot(900, lambda: self.refresh_item(parent) if parent else self.load_favorites())
 
@@ -1530,20 +2309,242 @@ class ScannerTools(QWidget):
         item.setExpanded(True)
         self.expand_item(item)
 
+    # ---- Avoids (1.1.77) ------------------------------------------------------------
+    def build_avoids_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        note = make_label("Every system, site, department, channel and talkgroup in the scanner's Favorites "
+                          "Lists, read with READ AVOIDS. Select one or more rows (Ctrl/Shift+click) and avoid "
+                          "them or remove their avoids. Temporary avoids end when the scanner is turned off.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        row = QHBoxLayout()
+        self.avoid_read = QPushButton("READ AVOIDS")
+        self.avoid_read.clicked.connect(self.scan_avoids)
+        row.addWidget(self.avoid_read)
+        self.avoid_stop = QPushButton("STOP")
+        self.avoid_stop.clicked.connect(self.stop_avoid_scan)
+        self.avoid_stop.setEnabled(False)
+        row.addWidget(self.avoid_stop)
+        self.avoid_leaves = QCheckBox("Include channels and talkgroups (slower)")
+        self.avoid_leaves.setChecked(True)
+        row.addWidget(self.avoid_leaves)
+        row.addStretch(1)
+        layout.addLayout(row)
+        row = QHBoxLayout()
+        self.avoid_only = QCheckBox("Avoided only")
+        self.avoid_only.setChecked(False)
+        self.avoid_only.toggled.connect(self.render_avoids)
+        row.addWidget(self.avoid_only)
+        self.avoid_kinds = {}
+        for kind, label in AVOID_GROUPS.items():
+            box = QCheckBox(label)
+            box.setChecked(True)
+            box.toggled.connect(self.render_avoids)
+            self.avoid_kinds[kind] = box
+            row.addWidget(box)
+        self.avoid_search = QLineEdit()
+        self.avoid_search.setPlaceholderText("Find…")
+        self.avoid_search.textChanged.connect(self.render_avoids)
+        row.addWidget(self.avoid_search, 1)
+        layout.addLayout(row)
+        self.avoid_table = QTableWidget(0, 5)
+        self.avoid_table.setHorizontalHeaderLabels(["Avoid", "Type", "Name", "Where", "Details"])
+        self.avoid_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.avoid_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.avoid_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.avoid_table.setSortingEnabled(True)
+        self.avoid_table.horizontalHeader().setStretchLastSection(True)
+        for column, width in ((0, 100), (1, 110), (2, 260), (3, 330)):
+            self.avoid_table.setColumnWidth(column, width)
+        self.avoid_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.avoid_table.customContextMenuRequested.connect(self.avoid_menu)
+        layout.addWidget(self.avoid_table, 1)
+        row = QHBoxLayout()
+        for label, status in (("TEMPORARY AVOID", 2), ("PERMANENT AVOID…", 1), ("REMOVE AVOID", 3)):
+            button = QPushButton(label)
+            button.clicked.connect(lambda _c=False, st=status: self.avoid_selected(st))
+            row.addWidget(button)
+        clear = QPushButton("REMOVE ALL TEMPORARY AVOIDS…")
+        clear.clicked.connect(self.clear_temporary_avoids)
+        row.addWidget(clear)
+        row.addStretch(1)
+        self.avoid_count = make_label("")
+        row.addWidget(self.avoid_count)
+        layout.addLayout(row)
+        self.avoid_rows = []
+        self.avoid_scanning = False
+        self.tabs.addTab(tab, "Avoids")
+
+    def scan_avoids(self):
+        """Read the whole Favorites tree for avoids. Replies come back through handle_list."""
+        if not self.monitor.connected:
+            set_text(self.status, "Not connected — nothing was sent.")
+            return
+        self.avoid_rows = []
+        self.avoid_scanning = True
+        self.avoid_read.setEnabled(False)
+        self.avoid_stop.setEnabled(True)
+        self.render_avoids()
+        self.request_list("GLT,FL", {"kind": "", "where": "", "sys_type": ""})
+
+    def stop_avoid_scan(self):
+        self.avoid_scanning = False
+        self.avoid_stop.setEnabled(False)
+        set_text(self.status, "Stopping: waiting for the lists already asked for…")
+        self.avoid_scan_step()
+
+    def avoids_received(self, command, context, root):
+        footer = root.find("Footer")
+        if footer is not None and footer.attrib.get("EOT", "1") == "0" and self.avoid_scanning:
+            if self.monitor.request_glt("tools", command):
+                self.glt_pending.append((command, context))
+        for element in root:
+            kind = element.tag
+            if kind == "Footer":
+                continue
+            name = (element.attrib.get("Name") or element.attrib.get("Freq") or "").strip()
+            sys_type = element.attrib.get("Type", "") if kind == "SYS" else context["sys_type"]
+            where = context["where"]
+            if kind in AVOID_GROUPS:
+                self.avoid_rows.append(avoid_row(element, where, sys_type))
+            index = element.attrib.get("Index", "")
+            if not self.avoid_scanning or not index:
+                continue
+            child = {"kind": kind, "where": f"{where} › {name}" if where else name, "sys_type": sys_type}
+            for list_kind in avoid_children(kind, sys_type, self.avoid_leaves.isChecked()):
+                self.request_list(f"GLT,{list_kind},{index}", child)
+        self.avoid_scan_step()
+
+    def avoid_scan_step(self):
+        """After each reply: progress, and the table once nothing more is on the way."""
+        waiting = sum(1 for _c, p in self.glt_pending if isinstance(p, dict))
+        if waiting and self.avoid_scanning:
+            set_text(self.status, f"Reading avoids: {len(self.avoid_rows)} item(s), {waiting} list(s) to go…")
+            return
+        if not self.avoid_scanning and waiting:
+            return                                  # replies still on the way are dropped as they arrive
+        stopped = not self.avoid_scanning
+        self.avoid_scanning = False
+        self.avoid_read.setEnabled(True)
+        self.avoid_stop.setEnabled(False)
+        self.render_avoids()
+        avoided = sum(1 for r in self.avoid_rows if r["avoid"] != "Off")
+        set_text(self.status, f"{'Stopped: ' if stopped else ''}{len(self.avoid_rows)} item(s) read, "
+                              f"{avoided} avoided.")
+
+    def shown_avoid_rows(self):
+        kinds = {k for k, box in self.avoid_kinds.items() if box.isChecked()}
+        return avoid_filter(self.avoid_rows, kinds, self.avoid_only.isChecked(), self.avoid_search.text())
+
+    def render_avoids(self, *_args):
+        table = getattr(self, "avoid_table", None)
+        if table is None:
+            return
+        rows = self.shown_avoid_rows()
+        position = {id(entry): number for number, entry in enumerate(self.avoid_rows)}
+        table.setSortingEnabled(False)
+        table.setRowCount(len(rows))
+        colours = {"Permanent": "#c62828", "Temporary": "#ef6c00"}
+        for r, entry in enumerate(rows):
+            values = (entry["avoid"], LIST_KINDS[entry["kind"]][0], entry["name"], entry["where"], entry["details"])
+            for c, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                cell.setData(Qt.ItemDataRole.UserRole, position[id(entry)])
+                if c == 0 and value in colours:
+                    cell.setForeground(QColor(colours[value]))
+                table.setItem(r, c, cell)
+        table.setSortingEnabled(True)
+        avoided = sum(1 for e in rows if e["avoid"] != "Off")
+        set_text(self.avoid_count, f"{len(rows)} shown, {avoided} avoided")
+
+    def selected_avoid_rows(self):
+        picked = set()
+        for index in self.avoid_table.selectedIndexes():
+            cell = self.avoid_table.item(index.row(), 0)
+            if cell is not None:
+                picked.add(cell.data(Qt.ItemDataRole.UserRole))
+        return [self.avoid_rows[i] for i in sorted(picked) if isinstance(i, int) and 0 <= i < len(self.avoid_rows)]
+
+    def avoid_menu(self, point):
+        menu = QMenu(self)
+        for label, status in (("Temporary Avoid", 2), ("Permanent Avoid…", 1), ("Remove Avoid", 3)):
+            menu.addAction(label, lambda st=status: self.avoid_selected(st)).setEnabled(self.monitor.connected)
+        menu.exec(self.avoid_table.viewport().mapToGlobal(point))
+
+    def avoid_selected(self, status):
+        self.send_avoids(self.selected_avoid_rows(), status)
+
+    def clear_temporary_avoids(self):
+        self.send_avoids([r for r in self.avoid_rows if r["avoid"] == "Temporary"], 3,
+                         "Remove all {n} temporary avoid(s)?")
+
+    def send_avoids(self, rows, status, question=None):
+        """AVD for each row; the table shows the new state straight away (READ AVOIDS to check)."""
+        rows = [r for r in rows if r["index"].isdigit() and (status != 3 or r["avoid"] != "Off")]
+        if not rows:
+            set_text(self.status, "Nothing to change: select rows first (avoided ones, to remove an avoid).")
+            return 0
+        if status == 1:
+            question = ("Permanently avoid {n} item(s)?\n\nThey stay avoided until you remove the avoid, "
+                        "including after the scanner is turned off.")
+        elif question is None and len(rows) > 10:
+            question = AVOID_STATUS[status] + " avoid for {n} item(s)?" if status != 3 else \
+                "Remove the avoid from {n} item(s)?"
+        if question and QMessageBox.question(self, "Avoids", question.format(n=len(rows))) \
+                != QMessageBox.StandardButton.Yes:
+            return 0
+        sent = 0
+        for entry in rows:
+            if not self.send(f"AVD,{entry['kind']},{entry['index']},,{status}"):
+                break
+            entry["avoid"] = AVOID_STATUS[status]
+            sent += 1
+        self.render_avoids()
+        if sent:
+            self.monitor.command_reply(f"QUEUED: {sent} AVD command(s)")
+            set_text(self.status, f"{AVOID_STATUS[status] if status != 3 else 'Avoid removed'}: {sent} item(s)."
+                     + (" SDS-Manager (0.1.21 or later) offers to keep permanent avoids in your configuration "
+                        "at the next Export to Scanner." if status in (1, 3) else ""))
+        return sent
+
     # ---- Quick keys ------------------------------------------------------------
     def build_quickkeys_tab(self):
         tab = QWidget()
         outer = QVBoxLayout(tab)
-        note = make_label("Green = enabled, grey = disabled, blank = no quick key assigned. "
-                      "Click a key to turn it on or off on the scanner.")
+        note = make_label("Green = On (scanned), grey = Off (not scanned). Click a key to switch it on the "
+                      "scanner. Names come from the scanner and from SDS-Manager.")
         note.setWordWrap(True)
         outer.addWidget(note)
         row = QHBoxLayout()
         read = QPushButton("READ QUICK KEYS")
         read.clicked.connect(lambda: self.send("FQK"))
         row.addWidget(read)
+        self.qk_used_only = QCheckBox("Only keys in use")
+        self.qk_used_only.setChecked(True)
+        self.qk_used_only.toggled.connect(lambda _on: self.redraw_quick_keys())
+        row.addWidget(self.qk_used_only)
         row.addStretch(1)
         outer.addLayout(row)
+        profiles = QHBoxLayout()
+        profiles.addWidget(make_label("Scan profile:"))
+        self.profile_choice = QComboBox()
+        self.profile_choice.setMinimumWidth(200)
+        profiles.addWidget(self.profile_choice)
+        apply_profile = QPushButton("APPLY PROFILE TO SCANNER")
+        apply_profile.setToolTip("Switch the scanner's quick keys to a scan profile saved in SDS-Manager "
+                                 "(Keys & Tags)")
+        apply_profile.clicked.connect(self.apply_scan_profile)
+        profiles.addWidget(apply_profile)
+        reload_names = QPushButton("RELOAD NAMES")
+        reload_names.setToolTip("Read SDS-Manager's names, number tags and scan profiles again")
+        reload_names.clicked.connect(self.reload_manager_keys)
+        profiles.addWidget(reload_names)
+        profiles.addStretch(1)
+        outer.addLayout(profiles)
+        self.manager_note = make_label("")
+        self.manager_note.setWordWrap(True)
+        outer.addWidget(self.manager_note)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         content = QWidget()
@@ -1560,6 +2561,8 @@ class ScannerTools(QWidget):
                 pick = QHBoxLayout()
                 pick.addWidget(make_label("In favorites list quick key:"))
                 self.sqk_fav = QComboBox()
+                self.sqk_fav.setMinimumWidth(340)       # 1.1.69: names were cut to a few letters
+                self.sqk_fav.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
                 self.sqk_fav.currentIndexChanged.connect(self.request_sqk)
                 pick.addWidget(self.sqk_fav)
                 pick.addStretch(1)
@@ -1568,6 +2571,8 @@ class ScannerTools(QWidget):
                 pick = QHBoxLayout()
                 pick.addWidget(make_label("In system quick key:"))
                 self.dqk_sys = QComboBox()
+                self.dqk_sys.setMinimumWidth(340)
+                self.dqk_sys.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
                 self.dqk_sys.currentIndexChanged.connect(self.request_dqk)
                 pick.addWidget(self.dqk_sys)
                 pick.addStretch(1)
@@ -1576,17 +2581,135 @@ class ScannerTools(QWidget):
             grid.setSpacing(3)
             buttons = []
             for n in range(100):
-                b = QPushButton(str(n))
-                b.setFixedSize(44, 30)
+                b = QPushButton(f"{n:02d}")
+                b.setFixedSize(QK_BUTTON_WIDTH, 30)
                 b.setEnabled(False)
                 b.clicked.connect(lambda checked=False, c=code, k=n: self.toggle_quick_key(c, k))
-                grid.addWidget(b, n // 10, n % 10)
+                grid.addWidget(b, n // QK_COLUMNS, n % QK_COLUMNS)
                 buttons.append(b)
             box_layout.addLayout(grid)
             self.qk_buttons[code] = buttons
+            self.qk_grids = getattr(self, "qk_grids", {})
+            self.qk_grids[code] = grid
             layout.addWidget(box)
         layout.addStretch(1)
         self.tabs.addTab(tab, "Quick Keys")
+        self.reload_manager_keys()
+
+    # ---- names and scan profiles from SDS-Manager (1.1.68) ----------------------
+    def reload_manager_keys(self):
+        self.manager_keys = load_manager_keys()
+        data = self.manager_keys
+        self.profile_choice.clear()
+        self.profile_choice.addItems(sorted(data.get("profiles", {}), key=str.casefold))
+        if data:
+            set_text(self.manager_note, f"Names, number tags and scan profiles from SDS-Manager: configuration "
+                     f"{data.get('configuration', '?')}, saved {str(data.get('written', '?')).replace('T', ' ')}. "
+                     "They match the scanner once that configuration has been exported.")
+        else:
+            set_text(self.manager_note, "No names from SDS-Manager yet: open a configuration there "
+                     "(and save scan profiles in Favorites → Keys & Tags).")
+        self.redraw_quick_keys()
+
+    def key_names(self, code):
+        if code == "FQK":
+            names = manager_key_names(self.manager_keys, "FQK")
+            names.update(self.fl_by_qk)            # the scanner's own list names win
+            return names
+        fl_key = self.sqk_fav.currentData()
+        if code == "SQK":
+            return manager_key_names(self.manager_keys, "SQK", fl_key)
+        return manager_key_names(self.manager_keys, "DQK", fl_key, self.dqk_sys.currentData())
+
+    def redraw_quick_keys(self):
+        for code, grid in getattr(self, "qk_grids", {}).items():
+            statuses = self.qk_status.get(code)
+            names = self.key_names(code)
+            only_used = self.qk_used_only.isChecked()
+            buttons = self.qk_buttons[code]
+            for b in buttons:
+                grid.removeWidget(b)
+            position = 0
+            for n, b in enumerate(buttons):
+                status = statuses[n] if statuses else None
+                show = not only_used or status in (1, 2) or (statuses is None and n in names)
+                b.setVisible(show)
+                name = names.get(n, "")
+                b.setText(f"{n:02d}  {fit_text(b, name, QK_BUTTON_WIDTH - 52)}" if name else f"{n:02d}")
+                state = {0: "not assigned", 1: "Off — not scanned", 2: "On — scanned"}.get(status, "not read yet")
+                b.setToolTip((f"{n:02d}: {name}\n" if name else f"Quick key {n:02d}\n") + state)
+                if show:
+                    grid.addWidget(b, position // QK_COLUMNS, position % QK_COLUMNS)
+                    position += 1
+
+    def apply_scan_profile(self):
+        name = self.profile_choice.currentText()
+        profile = self.manager_keys.get("profiles", {}).get(name)
+        if not profile:
+            set_text(self.status, "Choose a scan profile (save them in SDS-Manager → Favorites → Keys & Tags).")
+            return
+        if not self.monitor.connected:
+            set_text(self.status, "Not connected — nothing was sent.")
+            return
+        steps = profile_steps(self.manager_keys, profile)
+        if not steps:
+            set_text(self.status, f"Profile {name} has nothing the scanner can switch by quick key.")
+            return
+        self.profile_run = {"name": name, "steps": steps, "index": 0, "phase": "read", "changed": 0,
+                            "failed": []}
+        set_text(self.status, f"Applying scan profile {name}: {len(steps)} step(s)…")
+        self.profile_next(start=True)
+
+    def profile_next(self, start=False):
+        run = self.profile_run
+        if run is None:
+            return
+        if not start:
+            run["index"] += 1
+        if run["index"] >= len(run["steps"]):
+            self.profile_run = None
+            failed = run["failed"]
+            set_text(self.status, f"✓ Scan profile {run['name']} applied: {run['changed']} set(s) of keys changed."
+                     + (f" Not applied: {', '.join(failed)}." if failed else ""))
+            self.send("FQK")
+            return
+        run["phase"] = "read"
+        code, read, _prefix, _wanted = run["steps"][run["index"]]
+        if not self.send(read):
+            self.profile_run = None
+            return
+        stamp = (run["name"], run["index"])
+        QTimer.singleShot(6000, lambda: self.profile_timeout(stamp))
+
+    def profile_timeout(self, stamp):
+        run = self.profile_run
+        if run is not None and (run["name"], run["index"]) == stamp:
+            run["failed"].append(run["steps"][run["index"]][1] + " (no answer)")
+            self.profile_next()
+
+    def profile_reply(self, code, body):
+        run = self.profile_run
+        step = run["steps"][run["index"]]
+        if code != step[0]:
+            return
+        values = [v.strip() for v in body.split(",")]
+        if run["phase"] == "set":
+            if body.strip() != "OK":
+                run["failed"].append(step[1] + f" ({body.strip()[:20]})")
+            self.profile_next()
+            return
+        if len(values) < 100 or not all(v.isdigit() for v in values[-100:]):
+            run["failed"].append(step[1] + f" ({body.strip()[:20]})")
+            self.profile_next()
+            return
+        current = [int(v) for v in values[-100:]]
+        wanted = merged_quick_keys(current, step[3])
+        if wanted == current:
+            self.profile_next()
+            return
+        run["phase"] = "set"
+        run["changed"] += 1
+        self.send(step[2] + ",".join(str(v) for v in wanted))
 
     QK_STYLES = {
         0: "QPushButton {background:#1c2530; color:#4b5563; border:1px solid #2a3442;}",
@@ -1595,6 +2718,9 @@ class ScannerTools(QWidget):
     }
 
     def handle_quick_keys(self, code, body):
+        if self.profile_run is not None:
+            self.profile_reply(code, body)
+            return
         values = [v.strip() for v in body.split(",")]
         if body.strip() == "OK":
             # A change was accepted: read back the current state.
@@ -1608,14 +2734,12 @@ class ScannerTools(QWidget):
         for n, (b, st) in enumerate(zip(self.qk_buttons[code], statuses)):
             set_css(b, self.QK_STYLES.get(st, self.QK_STYLES[0]))
             b.setEnabled(st in (1, 2) and self.monitor.connected)
-            label = self.fl_by_qk.get(n) if code == "FQK" else None
-            b.setToolTip((f"{n}: {label}\n" if label else f"Quick key {n}\n")
-                         + {0: "not assigned", 1: "disabled", 2: "enabled"}.get(st, "?"))
         existing = [n for n, st in enumerate(statuses) if st in (1, 2)]
+        self.redraw_quick_keys()
         if code == "FQK":
-            self.fill_combo(self.sqk_fav, existing, self.fl_by_qk)
+            self.fill_combo(self.sqk_fav, existing, self.key_names("FQK"))
         elif code == "SQK":
-            self.fill_combo(self.dqk_sys, existing, {})
+            self.fill_combo(self.dqk_sys, existing, self.key_names("SQK"))
         set_text(self.status, f"{code}: {len(existing)} quick key(s) in use.")
 
     @staticmethod
@@ -1624,7 +2748,7 @@ class ScannerTools(QWidget):
         combo.blockSignals(True)
         combo.clear()
         for k in keys:
-            combo.addItem(f"{k} — {names[k]}" if k in names else str(k), k)
+            combo.addItem(f"{k:02d} — {names[k]}" if k in names else f"{k:02d}", k)
         if current in keys:
             combo.setCurrentIndex(keys.index(current))
         combo.blockSignals(False)
@@ -19795,6 +20919,7 @@ class Monitor(QMainWindow):
         self.total_receptions = 0
         self.total_seconds = 0.0
         self.scanner_tools = self.activity_charts = self.unit_id_log = None
+        self.watch_manager_keys()
         # GLT replies arrive in the order requested; this records which window
         # asked for each one (Scanner Tools or Discovery).
         self.glt_owners = deque()
@@ -19924,6 +21049,19 @@ class Monitor(QMainWindow):
         return None
 
     # ---- Scanner Tools, charts, unit log, alerts --------------------------
+    def edit_current_in_manager(self):
+        if not self.last_heard:
+            self.statusBar().showMessage("Nothing received yet: Edit in Manager uses the last channel heard.", 6000)
+            return
+        self.statusBar().showMessage(edit_in_manager(manager_request(self.last_heard), self), 8000)
+
+    def add_current_in_manager(self):
+        if not self.last_heard:
+            self.statusBar().showMessage("Nothing received yet: Add to Favorites List uses the last channel heard.",
+                                         6000)
+            return
+        values = dict(self.last_heard, Modulation=self.info_values.get("Modulation", ""))
+        self.statusBar().showMessage(edit_in_manager(add_request(values), self), 8000)
 
     def show_about(self):
         QMessageBox.about(self, "About SDS100 Monitor", ABOUT_HTML.format(
@@ -20282,27 +21420,33 @@ class Monitor(QMainWindow):
         self.status.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.status.customContextMenuRequested.connect(
             lambda pos: self.live_context_menu(self.status.mapToGlobal(pos)))
-        grid = QGridLayout()
-        self.fields = {}
-        # Site and Unit ID are display-only; they are not written to the CSV,
-        # so the history file format stays unchanged.
-        info_fields = ("System", "Site", "Department", "Channel", "Frequency",
-                       "Talkgroup", "Unit ID", "Mode", "RSSI")
-        for row, key in enumerate(info_fields):
-            grid.addWidget(make_label(key.upper()), row, 0)
-            val = make_label("—")
-            val.setObjectName("value")
-            val.setWordWrap(True)
-            grid.addWidget(val, row, 1)
-            val.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-            val.customContextMenuRequested.connect(
-                lambda pos, w=val: self.live_context_menu(w.mapToGlobal(pos)))
-            self.fields[key] = val
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 4)
-        for row in range(len(info_fields)):
-            grid.setRowStretch(row, 1)
-        info_layout.addLayout(grid, 1)
+        # 1.1.71: the lines shown, their order, labels and colours are yours to choose
+        # (View → Customize Scanner Information…). self.fields keeps the latest value of every
+        # field for the rest of the program; the panel shows the chosen lines.
+        info_tab.setObjectName("infoPanel")
+        info_tab.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.info_tab = info_tab
+        self.fields = {key: make_label("—") for key in INFO_FIELDS if key != "Custom"}
+        self.info_values = {key: "—" for key in self.fields}
+        self.info_grid = QGridLayout()
+        self.info_grid.setColumnStretch(0, 1)
+        self.info_grid.setColumnStretch(1, 4)
+        self.info_rows = []
+        self.info_settings = load_info_settings()
+        # 1.1.74: scanner and SDS-Manager out of step; click to hide until the warning changes.
+        self.sync_banner = QLabel()
+        self.sync_banner.setWordWrap(True)
+        self.sync_banner.setStyleSheet("background:#ffd54f; color:#1a1a1a; border-radius:4px; padding:4px 8px;")
+        self.sync_banner.setToolTip("Click to hide this warning until it changes")
+        self.sync_banner.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sync_banner.mousePressEvent = lambda _e: self.dismiss_sync_warning()
+        self.sync_banner.hide()
+        self.sync_dismissed = ""
+        self.sync_list = ("", "")
+        info_layout.addWidget(self.sync_banner)
+        QTimer.singleShot(0, self.update_sync_warning)
+        info_layout.addLayout(self.info_grid, 1)
+        self.build_info_rows(self.info_settings["current"])
         self.signal = QProgressBar()
         self.signal.setRange(0, 100)
         self.signal.setFormat("Signal strength: unavailable")
@@ -20384,6 +21528,7 @@ class Monitor(QMainWindow):
                                lambda: self.open_analysis("suggestions_window", UnitSuggestionsWindow))
         view_menu = self.menuBar().addMenu("View")
         view_menu.addAction("Transcription…", self.open_transcription)
+        view_menu.addAction("Customize Scanner Information…", self.customize_info_panel)
         view_menu.addSeparator()
         # Tools (v1.1.64): the windows used most at the top, the rest grouped in submenus.
         tools_menu = self.menuBar().addMenu("Tools")
@@ -20410,6 +21555,9 @@ class Monitor(QMainWindow):
         tools_menu.addAction("Ten Codes…", lambda: self.open_analysis("ten_codes_window", TenCodesWindow))
         keypad_sub = tools_menu.addMenu("Macro Keypad")
         keypad_sub.addAction("Macro Keypad…", lambda: self.macro_keypad.open())
+        tools_menu.addSeparator()
+        tools_menu.addAction("Edit Current Channel in Manager…", self.edit_current_in_manager)
+        tools_menu.addAction("Add Current Channel to Favorites List in Manager…", self.add_current_in_manager)
         discovery_menu = self.menuBar().addMenu("Discovery")
         discovery_menu.addAction("Discovery Control…", self.open_discovery)
         self.discovery_load_action = discovery_menu.addAction(
@@ -20756,6 +21904,119 @@ class Monitor(QMainWindow):
             self.archive_browser.raise_()
             self.archive_browser.activateWindow()
 
+    # ---- SDS-Manager's names, number tags and profiles, reloaded when they change (1.1.73) -------
+    def watch_manager_keys(self):
+        from PyQt6.QtCore import QFileSystemWatcher
+        self.keys_watcher = QFileSystemWatcher(self)
+        self.keys_timer = QTimer(self)
+        self.keys_timer.setSingleShot(True)
+        self.keys_timer.setInterval(700)            # SDS-Manager replaces the file; wait for it to settle
+        self.keys_timer.timeout.connect(self.manager_keys_changed)
+        self.keys_watcher.fileChanged.connect(lambda _p: self.keys_timer.start())
+        self.keys_watcher.directoryChanged.connect(lambda _p: self.keys_timer.start())
+        self.rewatch_manager_keys()
+
+    def rewatch_manager_keys(self):
+        folder = MANAGER_KEYS_FILE.parent
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        watched = list(self.keys_watcher.files() or []) + list(self.keys_watcher.directories() or [])
+        for path in (folder, MANAGER_KEYS_FILE):
+            if path.exists() and str(path) not in watched:
+                self.keys_watcher.addPath(str(path))
+
+    def manager_keys_changed(self):
+        """SDS-Manager saved its configuration or a scan profile: refresh what came from it."""
+        self.rewatch_manager_keys()
+        if hasattr(self, "jnt_pick"):
+            self.fill_number_tags()
+        tools = getattr(self, "scanner_tools", None)
+        if tools is not None:
+            tools.reload_manager_keys()
+        self.update_sync_warning()
+        self.statusBar().showMessage("Names, number tags and scan profiles updated from SDS-Manager.", 5000)
+
+    def update_sync_warning(self):
+        banner = getattr(self, "sync_banner", None)
+        if banner is None:
+            return
+        text = scanner_sync_warning(load_manager_keys(), *self.sync_list)
+        banner.setText(text)
+        banner.setVisible(bool(text) and text != self.sync_dismissed)
+
+    def dismiss_sync_warning(self):
+        self.sync_dismissed = self.sync_banner.text()
+        self.sync_banner.hide()
+
+    # ---- the customizable Scanner Information panel (1.1.71) -------------------------------------
+    def build_info_rows(self, layout):
+        for _line, name, value in self.info_rows:
+            for widget in (name, value):
+                if widget is not None:
+                    self.info_grid.removeWidget(widget)
+                    widget.deleteLater()
+        self.info_rows = []
+        self.info_layout_now = layout
+        for row, line in enumerate(layout["lines"]):
+            name = make_label(line["label"]) if line["show_label"] else None
+            value = make_label("—")
+            value.setObjectName("value")
+            value.setWordWrap(True)
+            value.setProperty("size_pct", line["size"])
+            value.setProperty("bold", line["bold"])
+            value.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            value.customContextMenuRequested.connect(
+                lambda pos, w=value: self.live_context_menu(w.mapToGlobal(pos)))
+            if name is not None:
+                self.info_grid.addWidget(name, row, 0)
+                self.info_grid.addWidget(value, row, 1)
+            else:
+                self.info_grid.addWidget(value, row, 0, 1, 2)
+            self.info_grid.setRowStretch(row, 1)
+            self.info_rows.append((line, name, value))
+        self.render_info()
+        try:
+            self.info_tab.rescale()          # apply the per-line sizes now, not only on the next resize
+        except (AttributeError, TypeError):  # not laid out yet
+            pass
+
+    def info_now(self):
+        values = dict(self.info_values)
+        now = datetime.now()
+        values["Clock"] = now.strftime("%H:%M:%S")
+        reception = getattr(self, "reception", None)
+        if reception:
+            values["Reception Start"] = reception["start"].strftime("%H:%M:%S")
+            values["Duration"] = f"{(now - reception['start']).total_seconds():.0f} s"
+        else:
+            values["Reception Start"] = values["Duration"] = "—"
+        return values
+
+    def render_info(self):
+        layout = getattr(self, "info_layout_now", None)
+        if layout is None:
+            return
+        values = self.info_now()
+        panel, styles = info_styles(layout, values)
+        set_css(self.info_tab, f"QWidget#infoPanel {{ background:{panel}; }}" if panel else "")
+        for (line, name, value), (fg, bg) in zip(self.info_rows, styles):
+            set_text(value, info_text(line, values))
+            set_css(value, info_line_css(fg, bg, line["bold"]))
+            if name is not None:
+                set_css(name, f"color:{fg};" if fg else "")
+
+    def customize_info_panel(self):
+        dialog = InfoPanelDialog(self, self.info_settings, self.build_info_rows)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.info_settings = dialog.result_settings()
+            try:
+                save_info_settings(self.info_settings)
+            except OSError as exc:
+                self.statusBar().showMessage(f"Could not save the panel layout: {exc}", 8000)
+        self.build_info_rows(self.info_settings["current"])
+
     def live_context_menu(self, global_point):
         """Read-only copying plus existing, connection-gated scanner commands."""
         menu = QMenu(self)
@@ -20782,6 +22043,11 @@ class Monitor(QMainWindow):
         menu.addSeparator()
         menu.addAction("Show Reception History", lambda: self.docks[0].raise_())
         menu.addAction("Browse History Archives…", self.open_archive_browser)
+        menu.addSeparator()
+        menu.addAction("Edit in Manager…", self.edit_current_in_manager)
+        menu.addAction("Add to Favorites List in Manager…", self.add_current_in_manager)
+        menu.addSeparator()
+        menu.addAction("Customize This Panel…", self.customize_info_panel)
         menu.exec(global_point)
 
     def install_tab_context_menus(self):
@@ -20927,11 +22193,59 @@ class Monitor(QMainWindow):
         go.setEnabled(False)
         grid.addWidget(go, 1, 3)
         self.settings_controls.append(go)
-        self.jnt_label = make_label("Number tags are set in your favorites lists "
-                                "(Sentinel or the manager program).")
+        # 1.1.67: number tags are often mistaken for quick keys; say which is which.
+        self.jnt_label = make_label(self.JNT_HINT)
         self.jnt_label.setWordWrap(True)
-        grid.addWidget(self.jnt_label, 2, 0, 1, 4)
+        grid.addWidget(self.jnt_label, 2, 0, 1, 3)
+        keys = QPushButton("QUICK KEYS…")
+        keys.setToolTip("Turn favorites list, system and department quick keys on and off "
+                        "(Scanner Tools → Quick Keys)")
+        keys.clicked.connect(self.open_quick_keys)
+        grid.addWidget(keys, 2, 3)
+        # 1.1.68: pick from what actually has number tags in SDS-Manager's configuration.
+        self.jnt_pick = QComboBox()
+        self.jnt_pick.setToolTip("Lists, systems and channels that have number tags in SDS-Manager's "
+                                 "configuration; choosing one fills in the three numbers")
+        self.jnt_pick.activated.connect(self.pick_number_tag)
+        grid.addWidget(self.jnt_pick, 3, 0, 1, 3)
+        refresh = QPushButton("↻")
+        refresh.setToolTip("Read the number tags from SDS-Manager again")
+        refresh.clicked.connect(self.fill_number_tags)
+        grid.addWidget(refresh, 3, 3)
+        self.fill_number_tags()
         layout.addWidget(box)
+
+    def fill_number_tags(self):
+        choices = manager_tag_choices(load_manager_keys())
+        self.jnt_pick.clear()
+        if not choices:
+            self.jnt_pick.addItem("No number tags in SDS-Manager's configuration yet (Favorites → Keys & Tags)", None)
+            return
+        self.jnt_pick.addItem(f"Choose one of {len(choices)} tagged items…", None)
+        for label, tags in choices:
+            self.jnt_pick.addItem(label, tags)
+
+    def pick_number_tag(self, index):
+        tags = self.jnt_pick.itemData(index)
+        if not tags:
+            return
+        for spin, value in zip(self.jnt_boxes, tags):
+            spin.setValue(-1 if value is None else int(value))
+
+    JNT_HINT = ("A number tag is a number you give a favorites list, system or channel so you can jump "
+                "straight to it. It is not the quick key: quick key 1 and number tag 1 are separate "
+                "settings, and most lists have no number tags until you set them (SDS-Manager: "
+                "Favorites List Settings for lists, the Number Tag column for channels; or Sentinel). "
+                "Quick keys turn scanning on and off: QUICK KEYS….")
+
+    def open_quick_keys(self):
+        self.open_scanner_tools()
+        tools = self.scanner_tools
+        if tools is not None:
+            for i in range(tools.tabs.count()):
+                if tools.tabs.tabText(i) == "Quick Keys":
+                    tools.tabs.setCurrentIndex(i)
+                    break
 
     def jump_number_tag(self):
         values = [b.value() for b in self.jnt_boxes]
@@ -20953,9 +22267,10 @@ class Monitor(QMainWindow):
         if body.strip() == "OK":
             set_text(self.jnt_label, f"✓ Scanner went to number tag {tags}.")
         else:
-            set_text(self.jnt_label, f"The scanner refused number tag {tags} ({body.strip()}). Check that a "
-                "channel has that tag in a monitored favorites list, and that the scanner "
-                "isn't in a menu. If you left a tag blank, try entering all three.")
+            set_text(self.jnt_label, f"The scanner has nothing with number tag {tags} ({body.strip()}). "
+                "Number tags aren't quick keys: favorites list quick key 1 is not number tag 1. Give the "
+                "list, system and channel number tags first (SDS-Manager or Sentinel); the list must be "
+                "monitored, and the scanner not in a menu. To turn lists on or off, use QUICK KEYS….")
 
     # ---- Status bar indicators --------------------------------------------
     SIGNAL_BARS = ["▁", "▁▂", "▁▂▃", "▁▂▃▄", "▁▂▃▄▅"]
@@ -22871,6 +24186,20 @@ class Monitor(QMainWindow):
         display = dict(info, **{"Site": site, "Unit ID": unit_text})
         for key, value in display.items():
             set_text(self.fields[key], value)
+        extras = gsi_extras(root, system, department, channel, prop)
+        for key, value in extras.items():
+            set_text(self.fields[key], value)
+        try:
+            monitored = root.find("MonitorList") if root is not None else None
+            playing = ((monitored.attrib.get("ListType", ""), monitored.attrib.get("Name", ""))
+                       if monitored is not None else ("", ""))
+            if playing != self.sync_list:
+                self.sync_list = playing
+                self.update_sync_warning()
+        except Exception:                     # a hint only; never stop the status update
+            pass
+        self.info_values = dict(display, **extras)
+        self.render_info()
         self.update_waterfall_status(root)
         ifx = disc.get("IFX", "") if in_discovery else self.attr(channel, "IFX", "")
         self.update_status_flags(prop, ifx)
