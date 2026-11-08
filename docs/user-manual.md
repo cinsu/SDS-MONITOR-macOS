@@ -572,7 +572,7 @@ Unit rules with "is exactly" match on the unit number, so they keep working afte
 
 ### Working with SDS-Manager
 
-SDS-Manager is a separate program for the scanner's Favorites Lists and settings. When both are installed:
+[SDS-Manager](https://github.com/jmlynchjr/SDS-Manager) is a separate program for the scanner's Favorites Lists and settings. When both are installed:
 
 - right-click a reception, or the Scanner Information panel, for **Edit in Manager…** (opens that channel or talkgroup in SDS-Manager) and **Add to Favorites List in Manager…** (adds what you heard to a list of your choice). The same two are in **Tools**. Requests go only to SDS-Manager on this computer;
 - quick key names, number tags and scan profiles come from SDS-Manager, and reload by themselves when it saves;

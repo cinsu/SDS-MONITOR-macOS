@@ -19,7 +19,7 @@ It shows what the scanner is receiving, keeps a searchable reception history, re
 - **Aircraft (ADS-B):** with readsb or dump1090 on the same PC, alerts on emergency squawks and watched aircraft, and matches callsigns heard in airband transcripts to the aircraft in range.
 - **Rdio Scanner:** sends each recorded call to your Rdio Scanner server, to listen on your phone with talkgroup and unit names, at home or (through a VPN such as Tailscale) away.
 - **Places and GPS:** keeps the scanner's location updated from a GPS receiver or your phone, and maps the places mentioned in transcripts (OpenStreetMap).
-- **SDS-Manager link:** with SDS-Manager (a separate program for the scanner's Favorites Lists) installed, right-click a reception → **Edit in Manager…** or **Add to Favorites List in Manager…**; quick key names, number tags and scan profiles come from SDS-Manager, and a warning shows when the scanner is out of date.
+- **SDS-Manager link:** with [SDS-Manager](https://github.com/jmlynchjr/SDS-Manager) (a separate program for the scanner's Favorites Lists) installed, right-click a reception → **Edit in Manager…** or **Add to Favorites List in Manager…**; quick key names, number tags and scan profiles come from SDS-Manager, and a warning shows when the scanner is out of date.
 - **Extras:** a USB macro keypad, themes (light, dark, night red, accent colours, text size) and a built-in update check.
 
 ## Install
