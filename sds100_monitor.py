@@ -34,7 +34,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.1.78"
+VERSION = "1.1.80"
 
 # Qt 6.10's new PipeWire audio backend can crash the program while it lists audio devices at
 # start (segmentation fault inside PipeWire, seen with Qt 6.10.2 / PipeWire 1.6.2; it also prints
@@ -2059,6 +2059,31 @@ def profile_steps(data, profile):
     return steps
 
 
+def step_names(data, step):
+    """{key: name} for the set of quick keys one profile step switches."""
+    code, read = step[0], step[1]
+    parts = [int(p) for p in read.split(",")[1:]]
+    return manager_key_names(data, code, *parts)
+
+
+def profile_change_lines(data, step, current, wanted):
+    """Plain lines for the keys one step turns On or Off (1.1.79)."""
+    names = step_names(data, step)
+    where = {"FQK": "Favorites List keys", "SQK": "System keys", "DQK": "Department keys"}[step[0]]
+    if step[0] == "SQK":
+        where += " in " + (manager_key_names(data, "FQK").get(int(step[1].split(",")[1])) or step[1])
+    elif step[0] == "DQK":
+        _c, fl, sk = step[1].split(",")
+        where += " in " + (manager_key_names(data, "SQK", int(fl)).get(int(sk)) or step[1])
+    lines = []
+    for verb, value in (("On", 2), ("Off", 1)):
+        keys = [n for n, (was, now) in enumerate(zip(current, wanted)) if was != now and now == value]
+        if keys:
+            lines.append(f"{where} — {verb}: " + ", ".join(
+                f"{k:02d}" + (f" {names[k]}" if k in names else "") for k in keys))
+    return lines
+
+
 def merged_quick_keys(current, wanted):
     """The scanner's 100 statuses (0 none, 1 off, 2 on) with assigned keys set as wanted."""
     return [st if st not in (1, 2) else (2 if want else 1) for st, want in zip(current, wanted)]
@@ -2643,6 +2668,8 @@ class ScannerTools(QWidget):
                     position += 1
 
     def apply_scan_profile(self):
+        """Apply a scan profile from SDS-Manager (1.1.68; 1.1.79: read everything first, show exactly what will
+        change, never switch off every Favorites List key, then check the scanner took it)."""
         name = self.profile_choice.currentText()
         profile = self.manager_keys.get("profiles", {}).get(name)
         if not profile:
@@ -2655,61 +2682,156 @@ class ScannerTools(QWidget):
         if not steps:
             set_text(self.status, f"Profile {name} has nothing the scanner can switch by quick key.")
             return
-        self.profile_run = {"name": name, "steps": steps, "index": 0, "phase": "read", "changed": 0,
-                            "failed": []}
-        set_text(self.status, f"Applying scan profile {name}: {len(steps)} step(s)…")
-        self.profile_next(start=True)
+        self.profile_run = {"name": name, "steps": steps, "phase": "read", "changed": 0, "failed": [],
+                            "current": {}, "wanted": {}, "todo": [], "waiting": set(), "serial": 0}
+        set_text(self.status, f"Scan profile {name}: reading {len(steps)} set(s) of quick keys…")
+        self.profile_start_phase()
 
-    def profile_next(self, start=False):
+    # 1.1.80: each phase sends all its commands at once and matches the replies as they come back, instead of
+    # waiting for every reply before sending the next command, which made a profile with many lists slow.
+    def profile_start_phase(self):
         run = self.profile_run
-        if run is None:
-            return
-        if not start:
-            run["index"] += 1
-        if run["index"] >= len(run["steps"]):
-            self.profile_run = None
-            failed = run["failed"]
-            set_text(self.status, f"✓ Scan profile {run['name']} applied: {run['changed']} set(s) of keys changed."
-                     + (f" Not applied: {', '.join(failed)}." if failed else ""))
-            self.send("FQK")
-            return
-        run["phase"] = "read"
-        code, read, _prefix, _wanted = run["steps"][run["index"]]
-        if not self.send(read):
-            self.profile_run = None
-            return
-        stamp = (run["name"], run["index"])
+        numbers = list(range(len(run["steps"]))) if run["phase"] == "read" else list(run["todo"])
+        run["waiting"] = set(numbers)
+        run["oks"] = {}
+        for number in numbers:
+            step = run["steps"][number]
+            command = (step[2] + ",".join(str(v) for v in run["wanted"][number])) if run["phase"] == "set" \
+                else step[1]
+            if not self.send(command):
+                self.profile_run = None
+                return
+        self.profile_watch()
+
+    def profile_watch(self):
+        """Give up on replies that don't come: 6 seconds after the last one."""
+        run = self.profile_run
+        run["serial"] += 1
+        stamp = (run["name"], run["phase"], run["serial"])
         QTimer.singleShot(6000, lambda: self.profile_timeout(stamp))
 
     def profile_timeout(self, stamp):
         run = self.profile_run
-        if run is not None and (run["name"], run["index"]) == stamp:
-            run["failed"].append(run["steps"][run["index"]][1] + " (no answer)")
-            self.profile_next()
+        if run is None or (run["name"], run["phase"], run["serial"]) != stamp:
+            return
+        for number in sorted(run["waiting"]):
+            run["failed"].append(run["steps"][number][1] + " (no answer)")
+        run["waiting"] = set()
+        self.profile_phase_done()
+
+    def profile_step_for(self, code, values):
+        """Which waiting step a quick key reply answers: by its list and system key numbers."""
+        run = self.profile_run
+        prefix = values[:-100]
+        for number in sorted(run["waiting"]):
+            step = run["steps"][number]
+            if step[0] != code:
+                continue
+            if code == "FQK":
+                return number
+            asked = step[1].split(",")[1:]
+            if prefix[:len(asked)] == asked:
+                return number
+        return None
 
     def profile_reply(self, code, body):
         run = self.profile_run
-        step = run["steps"][run["index"]]
-        if code != step[0]:
+        text = body.strip()
+        if run["phase"] == "set":
+            if text == "OK" or text.startswith(("NG", "ERR")):
+                # Set replies carry no key numbers; they come back in the order the commands were sent.
+                number = next((n for n in run["todo"] if n in run["waiting"] and run["steps"][n][0] == code), None)
+                if number is None:
+                    return
+                run["waiting"].discard(number)
+                if text == "OK":
+                    run["changed"] += 1
+                else:
+                    run["failed"].append(run["steps"][number][1] + f" ({text[:20]})")
+                self.profile_progress()
             return
         values = [v.strip() for v in body.split(",")]
-        if run["phase"] == "set":
-            if body.strip() != "OK":
-                run["failed"].append(step[1] + f" ({body.strip()[:20]})")
-            self.profile_next()
-            return
         if len(values) < 100 or not all(v.isdigit() for v in values[-100:]):
-            run["failed"].append(step[1] + f" ({body.strip()[:20]})")
-            self.profile_next()
+            return                                          # a late OK or something else; not for us
+        number = self.profile_step_for(code, values)
+        if number is None:
             return
+        run["waiting"].discard(number)
         current = [int(v) for v in values[-100:]]
-        wanted = merged_quick_keys(current, step[3])
-        if wanted == current:
-            self.profile_next()
+        if run["phase"] == "read":
+            run["current"][number] = current
+        elif current != run["wanted"][number]:
+            run["failed"].append(run["steps"][number][1] + " (the scanner shows something else)")
+        self.profile_progress()
+
+    def profile_progress(self):
+        run = self.profile_run
+        if run["waiting"]:
+            word = {"read": "reading", "set": "setting", "verify": "checking"}[run["phase"]]
+            set_text(self.status, f"Scan profile {run['name']}: {word}… {len(run['waiting'])} to go.")
+            self.profile_watch()
             return
-        run["phase"] = "set"
-        run["changed"] += 1
-        self.send(step[2] + ",".join(str(v) for v in wanted))
+        run["serial"] += 1                                   # cancel the pending watch
+        self.profile_phase_done()
+
+    def profile_phase_done(self):
+        run = self.profile_run
+        if run["phase"] == "read":
+            lines = []
+            for number, step in enumerate(run["steps"]):
+                current = run["current"].get(number)
+                if current is None:
+                    continue
+                wanted = merged_quick_keys(current, step[3])
+                if step[0] == "FQK" and 2 in current and 2 not in wanted:
+                    self.profile_run = None
+                    QMessageBox.warning(self, "Scan Profile", f"Profile {run['name']} would switch off every "
+                                        "Favorites List quick key, so the scanner would have nothing to scan. "
+                                        "Nothing was changed.\n\nCheck the profile in SDS-Manager "
+                                        "(Favorites → Keys & Tags), or that SDS-Manager's configuration matches "
+                                        "the scanner.")
+                    set_text(self.status, f"Scan profile {run['name']} not applied: it switches every list off.")
+                    return
+                if wanted != current:
+                    run["wanted"][number] = wanted
+                    run["todo"].append(number)
+                    lines += profile_change_lines(self.manager_keys, step, current, wanted)
+            if not run["todo"]:
+                self.profile_run = None
+                set_text(self.status, f"✓ Scan profile {run['name']}: the scanner already matches it."
+                         + (f" Not read: {', '.join(run['failed'])}." if run["failed"] else ""))
+                self.refresh_all_quick_keys()
+                return
+            text = "\n".join(lines[:40]) + (f"\n…and {len(lines) - 40} more." if len(lines) > 40 else "")
+            scanner = self.manager_keys.get("scanner") if isinstance(self.manager_keys.get("scanner"), dict) else {}
+            if scanner.get("state") == "changed":
+                text = ("⚠ SDS-Manager has saved changes that aren't on the scanner yet. If quick keys were changed, "
+                        "the numbers below may switch different things on the scanner. Export to Scanner first "
+                        "to be sure.\n\n" + text)
+            if QMessageBox.question(self, "Scan Profile", f"Apply scan profile {run['name']}?\n\n{text}") \
+                    != QMessageBox.StandardButton.Yes:
+                self.profile_run = None
+                set_text(self.status, f"Scan profile {run['name']} not applied.")
+                return
+            set_text(self.status, f"Scan profile {run['name']}: setting {len(run['todo'])} set(s) of quick keys…")
+            run["phase"] = "set"
+            self.profile_start_phase()
+        elif run["phase"] == "set":
+            run["phase"] = "verify"
+            self.profile_start_phase()
+        else:
+            self.profile_run = None
+            failed = run["failed"]
+            set_text(self.status, f"✓ Scan profile {run['name']} applied: {run['changed']} set(s) of keys changed."
+                     + (f" Didn't take: {', '.join(failed)}." if failed else ""))
+            self.refresh_all_quick_keys()
+
+    def refresh_all_quick_keys(self):
+        """Read every grid again so the buttons show what the scanner has now."""
+        self.send("FQK")
+        if hasattr(self, "sqk_fav"):
+            self.request_sqk()
+            self.request_dqk()
 
     QK_STYLES = {
         0: "QPushButton {background:#1c2530; color:#4b5563; border:1px solid #2a3442;}",

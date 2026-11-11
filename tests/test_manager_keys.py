@@ -73,38 +73,109 @@ class ManagerKeysTests(unittest.TestCase):
 
 
 class ProfileRunTests(unittest.TestCase):
-    def test_applying_a_profile_reads_then_sets_each_set(self):
-        w = monitor(fresh=True)
+    def run_tools(self):
         tools = mon.ScannerTools.__new__(mon.ScannerTools)
-        sent = []
+        sent, shown, asked = [], [], []
         tools.monitor = type("M", (), {"connected": True})()
         tools.send = lambda command: sent.append(command) or True
         tools.status = object()
-        shown = []
+        tools.manager_keys = sample()
+        tools.profile_choice = type("C", (), {"currentText": lambda self: "Storm"})()
+        return tools, sent, shown, asked
+
+    def test_reads_all_shows_the_changes_sets_and_checks(self):     # 1.1.79; 1.1.80: all at once
+        w = monitor(fresh=True)
+        tools, sent, shown, asked = self.run_tools()
+        old, question = mon.set_text, mon.QMessageBox.question
+        mon.set_text = lambda label, text: shown.append(text)
+        mon.QMessageBox.question = staticmethod(lambda *a: asked.append(a[2]) or mon.QMessageBox.StandardButton.Yes)
+        try:
+            tools.apply_scan_profile()
+            self.assertEqual(sent, ["FQK", "SQK,0", "DQK,0,1", "SQK,1"])       # every read sent together
+            # replies may come in any order; they are matched by their key numbers
+            tools.handle_quick_keys("SQK", "1," + ",".join(["0", "0", "0", "2"] + ["0"] * 96))
+            tools.handle_quick_keys("FQK", ",".join(["2", "2"] + ["0"] * 98))
+            tools.handle_quick_keys("DQK", "0,1," + ",".join(["2", "2"] + ["0"] * 98))
+            self.assertEqual(asked, [])
+            tools.handle_quick_keys("SQK", "0," + ",".join(["0", "2"] + ["0"] * 98))
+            self.assertEqual(len(asked), 1)
+            self.assertIn("Department keys", asked[0])
+            self.assertIn("Off: 01", asked[0])
+            self.assertEqual(sent[4:], ["DQK,0,1," + ",".join(["2", "1"] + ["0"] * 98),
+                                        "SQK,1," + ",".join(["0", "0", "0", "1"] + ["0"] * 96)])
+            tools.handle_quick_keys("DQK", "OK")
+            tools.handle_quick_keys("SQK", "OK")
+            self.assertEqual(sent[6:], ["DQK,0,1", "SQK,1"])                    # read back to check
+            tools.handle_quick_keys("DQK", "0,1," + ",".join(["2", "1"] + ["0"] * 98))
+            tools.handle_quick_keys("SQK", "1," + ",".join(["0", "0", "0", "1"] + ["0"] * 96))
+            self.assertIsNone(tools.profile_run)
+            self.assertEqual(sent[-1], "FQK")                                   # display refreshed
+            self.assertIn("Storm applied: 2 set(s)", shown[-1])
+            self.assertNotIn("Didn't take", shown[-1])
+        finally:
+            mon.set_text, mon.QMessageBox.question = old, question
+        del w
+
+    def test_a_reply_that_never_comes(self):
+        w = monitor(fresh=True)
+        tools, sent, shown, asked = self.run_tools()
         old = mon.set_text
         mon.set_text = lambda label, text: shown.append(text)
         try:
-            tools.manager_keys = sample()
-            tools.profile_choice = type("C", (), {"currentText": lambda self: "Storm"})()
             tools.apply_scan_profile()
-            self.assertEqual(sent, ["FQK"])
-            all_on = ",".join(["2", "2"] + ["0"] * 98)
-            tools.handle_quick_keys("FQK", all_on)         # nothing to change for list keys
-            self.assertEqual(sent[-1], "SQK,0")
+            tools.handle_quick_keys("FQK", ",".join(["2", "2"] + ["0"] * 98))
             tools.handle_quick_keys("SQK", "0," + ",".join(["0", "2"] + ["0"] * 98))
-            self.assertEqual(sent[-1], "DQK,0,1")
-            tools.handle_quick_keys("DQK", "0,1," + ",".join(["2", "2"] + ["0"] * 98))
-            self.assertEqual(sent[-1], "DQK,0,1," + ",".join(["2", "1"] + ["0"] * 98))
-            tools.handle_quick_keys("DQK", "OK")
-            self.assertEqual(sent[-1], "SQK,1")
-            tools.handle_quick_keys("SQK", "1," + ",".join(["0", "0", "0", "2"] + ["0"] * 96))
-            self.assertEqual(sent[-1], "SQK,1," + ",".join(["0", "0", "0", "1"] + ["0"] * 96))
-            tools.handle_quick_keys("SQK", "OK")
+            tools.handle_quick_keys("DQK", "0,1," + ",".join(["2", "1"] + ["0"] * 98))   # already as wanted
+            run = tools.profile_run
+            tools.profile_timeout((run["name"], run["phase"], run["serial"]))          # SQK,1 never answers
             self.assertIsNone(tools.profile_run)
-            self.assertEqual(sent[-1], "FQK")                # read back for the display
-            self.assertIn("Storm applied: 2 set(s)", shown[-1])
+            self.assertIn("already matches", shown[-1])
+            self.assertIn("SQK,1 (no answer)", shown[-1])
         finally:
             mon.set_text = old
+        del w
+
+    def test_warns_when_the_scanner_is_out_of_date(self):
+        w = monitor(fresh=True)
+        tools, sent, shown, asked = self.run_tools()
+        tools.manager_keys["scanner"] = {"state": "changed"}
+        old, question = mon.set_text, mon.QMessageBox.question
+        mon.set_text = lambda label, text: shown.append(text)
+        mon.QMessageBox.question = staticmethod(lambda *a: asked.append(a[2]) or "no")
+        try:
+            tools.apply_scan_profile()
+            for reply in ("FQK", ",".join(["2", "2"] + ["0"] * 98)), \
+                         ("SQK", "0," + ",".join(["0", "2"] + ["0"] * 98)), \
+                         ("DQK", "0,1," + ",".join(["2", "2"] + ["0"] * 98)), \
+                         ("SQK", "1," + ",".join(["0", "0", "0", "2"] + ["0"] * 96)):
+                tools.handle_quick_keys(*reply)
+            self.assertIn("aren't on the scanner yet", asked[0])
+            self.assertIsNone(tools.profile_run)                         # answered No: nothing set
+            self.assertFalse(any("," in c and c.count(",") > 50 for c in sent))
+        finally:
+            mon.set_text, mon.QMessageBox.question = old, question
+        del w
+
+    def test_never_switches_every_list_off(self):
+        w = monitor(fresh=True)
+        tools, sent, shown, asked = self.run_tools()
+        tools.manager_keys["profiles"]["Storm"]["fl"] = [False] * 100
+        old, warning = mon.set_text, mon.QMessageBox.warning
+        warned = []
+        mon.set_text = lambda label, text: shown.append(text)
+        mon.QMessageBox.warning = staticmethod(lambda *a: warned.append(a[2]))
+        try:
+            tools.apply_scan_profile()
+            for reply in (("FQK", ",".join(["2", "2"] + ["0"] * 98)),
+                          ("SQK", "0," + ",".join(["0", "2"] + ["0"] * 98)),
+                          ("DQK", "0,1," + ",".join(["2", "2"] + ["0"] * 98)),
+                          ("SQK", "1," + ",".join(["0", "0", "0", "2"] + ["0"] * 96))):
+                tools.handle_quick_keys(*reply)
+            self.assertIsNone(tools.profile_run)
+            self.assertIn("nothing to scan", warned[0])
+            self.assertFalse(any(c.startswith("FQK,") for c in sent))
+        finally:
+            mon.set_text, mon.QMessageBox.warning = old, warning
         del w
 
 

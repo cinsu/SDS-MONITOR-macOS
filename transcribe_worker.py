@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (c) 2026 J. Lynch. See LICENSE.
-"""Speech-to-text worker for SDS100 Monitor (v1.1.78).
+"""Speech-to-text worker for SDS100 Monitor (v1.1.80).
 
 Runs under the transcription engine's own Python (a virtual environment with
 faster-whisper installed), so the Monitor itself needs nothing extra.

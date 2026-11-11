@@ -2,6 +2,21 @@
 
 Newest first. Versions before 1.1.47 were tested by hand on a real SDS100; from 1.1.47 on, every version also passes the automated tests.
 
+## v1.1.80: Scan profiles apply much faster
+
+- **Fixed: applying a scan profile was slow** (with many Favorites Lists it took long enough to look as if nothing happened). Each command waited for the scanner's answer before the next one was sent. Now all the reads go together, then all the changes, then all the checks; answers are matched by their list and system key numbers as they come back.
+- The status line counts down while it works ("reading… 12 to go").
+- A command the scanner doesn't answer is given up 6 seconds after the last answer, and named in the status line.
+
+## v1.1.79: Scan profiles: see what changes, and check it took
+
+- **Fixed: after applying a scan profile, the quick key buttons didn't change.** Only the Favorites List keys were read back; the system and department grids kept showing the old state. All three are read again now.
+- **Applying a scan profile now reads every set of quick keys first**, then shows exactly which keys go On and Off (with their names) and asks once. Nothing is changed until you say Yes.
+- **It never switches off every Favorites List key** (the scanner would show nothing to scan). A profile that would is refused, with what to check.
+- **A warning in that question when SDS-Manager has changes that aren't on the scanner yet**: if quick keys were renumbered there, the profile's numbers may switch other things on the scanner. Export to Scanner first.
+- **After setting, each set is read back**; anything the scanner didn't take is named in the status line.
+- New tests (2).
+
 ## v1.1.78: Site quick keys
 
 - **New: "Site quick key" for the Scanner Information panel** (View → Customize Scanner Information…): the quick key of the trunked site being scanned, as the scanner reports it. A site's key is one of its system's department keys (SDS-Manager 0.1.22 sets them).

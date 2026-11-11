@@ -1,6 +1,6 @@
 # SDS100 Monitor User Manual
 
-Version 1.1.78 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
+Version 1.1.80 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
 
 Use the outline button (☰) at the top right of this file to jump to a chapter.
 
@@ -524,7 +524,7 @@ All the avoids in one place. **READ AVOIDS** reads every system, site, departmen
 
 Favorites list, system and department **quick keys** are shown as grids of buttons: green means On (scanned), grey Off. Click a key to turn it on or off. Choose which favorites list and system the lower grids show. Each button shows what the key switches, for example "00 Greenville County"; **Only keys in use** (on by default) hides the empty ones. Favorites list names come from the scanner; system, department and site names come from SDS-Manager, when it's installed (sites are marked "(site)", because a trunked site uses its system's department keys).
 
-**Scan profiles:** choose a profile saved in SDS-Manager (Favorites → Keys & Tags) and press **APPLY PROFILE TO SCANNER**. The Monitor reads each set of quick keys, changes only the ones that differ, and reads back.
+**Scan profiles:** choose a profile saved in SDS-Manager (Favorites → Keys & Tags) and press **APPLY PROFILE TO SCANNER**. The Monitor reads every set of quick keys first (the status line counts down), then lists exactly which keys go On and Off, by name, and asks once. Nothing changes until you say Yes. It warns when SDS-Manager has changes that aren't on the scanner yet (export first, or the numbers may switch other things), refuses a profile that would switch off every Favorites List key, and reads each set back afterwards, naming anything the scanner didn't take.
 
 ![Scanner Tools → Quick Keys.](images/tools-quick-keys.png)
 
