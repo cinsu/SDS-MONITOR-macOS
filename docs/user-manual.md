@@ -8,6 +8,9 @@ Use the outline button (☰) at the top right of this file to jump to a chapter.
 
 This manual describes **SDS100 Monitor version 1.1.65**, a Linux program for monitoring and controlling a Uniden SDS100 scanner from a PC over its USB cable. It runs on desktop Linux PCs and on the Raspberry Pi (chapter 25).
 
+> [!NOTE]
+> **On a Mac?** This fork adds macOS support. See [Appendix: Running on macOS](#appendix-running-on-macos) for install steps and what's different.
+
 The chapters follow the program's menus and panels. Chapters 1 to 4 cover installing, connecting and the main window, and are worth reading first. The rest can be read as you need them.
 
 ### Conventions
@@ -83,6 +86,9 @@ The SDS100's USB port appears on the PC as a serial port, usually `/dev/ttyACM0`
 The SDS100's USB port carries data only, not audio. Audio for recording and transcription comes from the headphone jack (chapter 9).
 
 ## 2. Installing
+
+> [!NOTE]
+> **On a Mac?** This fork adds macOS support. See [Appendix: Running on macOS](#appendix-running-on-macos) for install steps and what's different.
 
 ### Install the package (recommended)
 
@@ -1802,3 +1808,81 @@ Uniden's *Remote Command Specification V2.00* doesn't fully describe every reply
 | **RF Power Plot** | Not available on the SDS100 (removed in its firmware); the program doesn't offer it. |
 | **Screen mirror** (`GST`) | Falls back to `STS` if refused. |
 | **Analyze stop** | The specification has no stop command; STOP returns the scanner to scan mode (`JPM,SCN_MODE`). |
+
+## Appendix: Running on macOS
+
+This fork ([cinsu/SDS-MONITOR-macOS](https://github.com/cinsu/SDS-MONITOR-macOS), `macos` branch) runs SDS100 Monitor on a Mac. The program is the same; only installing, a few paths and a handful of Linux-only features differ. Everything else in this manual applies as written.
+
+> [!NOTE]
+> The Mac version has been tested on an Apple Silicon Mac with an **SDS150**. Report Mac problems on the fork's GitHub page, not to the original author.
+
+### What you need
+
+- A Mac running a current version of macOS, on Apple Silicon or Intel.
+- **Homebrew** (brew.sh). The setup script uses it to install Python 3.12 and `ffmpeg`.
+- **git**. macOS offers to install it the first time you type `git` in Terminal.
+
+On a Mac, `~` means your home folder, for example `/Users/yourname`.
+
+### Installing
+
+In Terminal:
+
+1. `cd ~`
+2. `git clone -b macos https://github.com/cinsu/SDS-MONITOR-macOS.git SDS-MONITOR`
+3. `cd ~/SDS-MONITOR`
+4. `./setup-mac.sh`
+
+`setup-mac.sh` installs Python 3.12 and `ffmpeg` with Homebrew, then puts the Monitor's own Python packages (PyQt6 and pyserial) in a private folder, `~/SDS-MONITOR/.venv-mac`. Nothing else on the Mac is changed.
+
+**Starting:** `~/SDS-MONITOR/launch-mac.sh`. Terminal stays open while the program runs, and any error messages appear there.
+
+**Updating:** `cd ~/SDS-MONITOR && git pull`, in place of **Help → Check for Updates…** (see below).
+
+**Removing:** delete the `~/SDS-MONITOR` folder. Your data stays.
+
+### Connecting
+
+The scanner's port is named `/dev/cu.usbmodem…` on a Mac, not `/dev/ttyACM0`. Choose it in the **Port** list and **CONNECT**. The Monitor recognises the scanner by Uniden's USB ID, so it finds it again if the name changes after a replug.
+
+If the list also shows a `/dev/tty.usbmodem…` port, choose the `cu.` one. You don't need the `dialout` group or any other permission step on a Mac.
+
+### Settings and files
+
+Settings are kept in `~/.config/SDS100Monitor/Monitor110.conf`, the same place as on Linux. Reception history, recordings, transcripts and reports are in `~/SDS100Monitor`, as described in chapter 27.
+
+> [!NOTE]
+> The Mac version deliberately keeps settings in that file rather than in macOS's own preferences store, so the automated tests (chapter 24) can use their throw-away home folder without touching your real settings.
+
+### What's different on a Mac
+
+| Feature | On a Mac |
+|---|---|
+| **Desktop alerts** | Shown as macOS notifications, with the system "Glass" sound. |
+| **Macro keypad** (chapter 18) | Not supported. The keypad is read from Linux input devices, which macOS doesn't have. Skip the keypad rule script. |
+| **Check for Updates** (chapter 23) | Doesn't work: it installs Linux `.deb` packages. Turn off the quiet check at start in that window and use `git pull`. |
+| **PC audio capture** (chapter 9) | Works, but most current Macs have no line-in jack, so connect the scanner's audio through a **USB audio adapter**. The first time, macOS asks whether Terminal may use the microphone: choose **Allow** (or later in System Settings → Privacy & Security → Microphone). |
+| **Transcription** (chapter 10) | Works on the CPU, which is fast on Apple Silicon. You don't need `python3-venv`; leave the NVIDIA GPU option unchecked. |
+| **Aircraft (ADS-B)** (chapter 26) | readsb doesn't normally run on a Mac. Point the **source** at a tar1090 on your network instead, for example `http://<pi-address>/tar1090/data/aircraft.json`. |
+| **Reports and the map** | Open in your default Mac browser. |
+| **Working with SDS-Manager** (chapter 7) | The Mac version of SDS-Manager is still in progress. |
+
+### SDS150 notes
+
+The original program was written for and tested on an SDS100. On the SDS150, connecting, the live display, reception history and the main controls work. Features that depend on the scanner's model or firmware, such as Close Call, Discovery, Weather and Tone-Out modes, the scanner screen, the waterfall and the battery display, may behave differently. See also the firmware appendix above.
+
+### Running the tests
+
+`cd ~/SDS-MONITOR && .venv-mac/bin/python -m unittest discover -s tests -t tests`
+
+The tests of the Linux install and cleanup scripts are skipped on a Mac. Everything else should pass.
+
+### Troubleshooting on a Mac
+
+**`setup-mac.sh` says Homebrew is missing.** Install it from brew.sh, then run the script again.
+
+**`launch-mac.sh` says to run `setup-mac.sh` first.** The private Python folder is missing. Run `./setup-mac.sh` in `~/SDS-MONITOR`.
+
+**No `/dev/cu.usbmodem…` port.** Choose **Serial Port** on the scanner, not mass storage, and check that the USB cable carries data. Unplug and replug.
+
+**No recordings, or silent recordings.** Check the USB audio adapter is chosen as the input in **PC audio capture**, and that Terminal is allowed to use the microphone in System Settings → Privacy & Security.
