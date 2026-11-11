@@ -484,6 +484,10 @@ def newest_manager_launcher(home=None):
             if Path(command).is_file():
                 return Path(command)                # SDS-Manager's .deb (0.1.0 and later), or the older name
     home = Path(home or Path.home())
+    if sys.platform == "darwin":
+        for mac in (home / "SDS-Manager" / "launch-mac.sh", home / "Projects" / "SDS-Manager" / "launch-mac.sh"):
+            if mac.is_file():
+                return mac
     installs = [p for p in home.glob("SDS100DatabaseFavoritesManager-*")
                 if p.is_dir() and not p.is_symlink() and (p / "launch.sh").is_file()]
     if not installs:
@@ -21444,7 +21448,11 @@ class Monitor(QMainWindow):
                 self.tray.showMessage(title, text, QSystemTrayIcon.MessageIcon.Information, 8000)
         if str(s.value("alerts/sound", "true")).lower() == "true":
             sound = Path("/usr/share/sounds/freedesktop/stereo/message-new-instant.oga")
-            if sound.exists() and shutil.which("paplay"):
+            mac_sound = Path("/System/Library/Sounds/Glass.aiff")
+            if sys.platform == "darwin" and mac_sound.exists():
+                subprocess.Popen(["/usr/bin/afplay", str(mac_sound)],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif sound.exists() and shutil.which("paplay"):
                 subprocess.Popen(["paplay", str(sound)],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
@@ -21487,8 +21495,9 @@ class Monitor(QMainWindow):
         self.port = QComboBox()
         self.port.setEditable(True)
         ports = [p.device for p in serial.tools.list_ports.comports()]
-        self.port.addItems(ports or ["/dev/ttyACM0"])
-        self.port.setCurrentText(self.settings.value("port", "/dev/ttyACM0"))
+        fallback = find_scanner_port("/dev/ttyACM0") if sys.platform == "darwin" else "/dev/ttyACM0"
+        self.port.addItems(ports or [fallback])
+        self.port.setCurrentText(self.settings.value("port", fallback))
         self.baud = QComboBox()
         self.baud.addItems(["115200", "57600", "38400", "19200", "9600"])
         self.baud.setCurrentText(self.settings.value("baud", "115200"))
