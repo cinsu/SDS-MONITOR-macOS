@@ -1,5 +1,7 @@
 # SDS100 Monitor
 
+> **This is a macOS fork** of [jmlynchjr/SDS-MONITOR](https://github.com/jmlynchjr/SDS-MONITOR), maintained by [cinsu](https://github.com/cinsu). The macOS changes are on the `macos` branch. Tested on an Apple Silicon Mac with an **SDS150**. Please report Mac problems here, not to the original author.
+
 Live monitoring and control of a **Uniden SDS100** scanner from a Linux PC, over the scanner's USB serial port.
 
 It shows what the scanner is receiving, keeps a searchable reception history, records and transcribes calls, and puts the scanner's controls, menus and analysis tools on your screen. Written in Python with PyQt6, developed and used on Kubuntu.
@@ -34,6 +36,55 @@ apt installs what it needs (PyQt6 and pyserial; Qt Multimedia and ffmpeg are rec
 Connect the SDS100 by USB and choose **Serial Port** on the scanner when it asks.
 
 Other distributions: install PyQt6 and pyserial for Python 3 and run `python3 sds100_monitor.py` from this folder (or `bash install.sh` to add a menu entry).
+
+## Running on macOS
+
+This fork adds macOS support. Nothing changes for Linux users.
+
+**Requirements:** macOS on Apple Silicon or Intel, [Homebrew](https://brew.sh), and git (macOS offers to install git the first time you run it).
+
+**1. Download and set up (one time):**
+
+```bash
+cd ~
+git clone -b macos https://github.com/cinsu/SDS-MONITOR-macOS.git SDS-MONITOR
+cd ~/SDS-MONITOR
+./setup-mac.sh
+```
+
+`setup-mac.sh` installs Python 3.12 and ffmpeg with Homebrew and puts the Monitor's own Python packages (PyQt6, pyserial) in a private folder, `.venv-mac`. Nothing else on your Mac is changed.
+
+**2. Connect the scanner:** plug it in by USB and choose **Serial Port** on the scanner when it asks.
+
+**3. Start the Monitor:**
+
+```bash
+~/SDS-MONITOR/launch-mac.sh
+```
+
+Choose the port that starts with `/dev/cu.usbmodem` (it shows Uniden's USB ID, `0x1965`).
+
+**Run the tests:**
+
+```bash
+cd ~/SDS-MONITOR && .venv-mac/bin/python -m unittest discover -s tests -t tests
+```
+
+**Get updates:**
+
+```bash
+cd ~/SDS-MONITOR && git pull
+```
+
+**Where things are kept on macOS:** settings in `~/.config/SDS100Monitor/Monitor110.conf`, and reception history, recordings and transcripts in `~/SDS100Monitor`, the same places as on Linux.
+
+**What's different on macOS:**
+
+- **Alerts** use macOS notifications and the system "Glass" sound.
+- **USB macro keypad:** not supported. It reads Linux input devices directly.
+- **Help → Check for Updates:** installs Linux `.deb` packages, so it doesn't work on a Mac. Turn the automatic check off in that window and use `git pull` instead.
+- **Recording and transcription:** most current Macs have no line-in jack, so you'll need a USB audio adapter. macOS asks permission for Terminal to use the microphone the first time. Transcription runs on the CPU; leave the NVIDIA GPU option unchecked.
+- **SDS150:** live display and controls work. The original program was written for the SDS100, so some SDS150 features may behave differently.
 
 ## Updates
 
