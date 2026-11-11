@@ -117,7 +117,7 @@ def main():
     spec.loader.exec_module(mon)
     assert str(mon.DATA_DIR).startswith(HOME)
     from PyQt6.QtCore import QSettings
-    QSettings("SDS100Monitor", "Monitor110").setValue("adsb/enabled", "false")   # not this PC's readsb
+    mon.monitor_settings().setValue("adsb/enabled", "false")   # not this PC's readsb
     window = mon.Monitor()
     window.show()
     pump(200)
@@ -146,7 +146,8 @@ def main():
         step(f"theme {group}={key}", lambda g=group, k=key: window.set_theme_option(g, k))
     pump(200)
     for widget in app.topLevelWidgets():
-        if widget is not window and widget.isVisible():
+        from PyQt6 import sip
+        if widget is not window and not sip.isdeleted(widget) and widget.isVisible():
             step(f"close {type(widget).__name__}", widget.close)
     step("close main window", window.close)
     pump(200)

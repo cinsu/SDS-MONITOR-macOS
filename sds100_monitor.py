@@ -736,6 +736,15 @@ def port_users(port):
 UNIDEN_USB_VID = 0x1965     # Uniden America
 
 
+def monitor_settings():
+    """The Monitor's settings. On macOS an INI file at the same path as on Linux
+    (~/.config/SDS100Monitor/Monitor110.conf), so it follows $HOME the way Linux does."""
+    if sys.platform != "darwin" or not hasattr(QSettings, "Format"):
+        return QSettings("SDS100Monitor", "Monitor110")
+    path = Path.home() / ".config" / "SDS100Monitor" / "Monitor110.conf"
+    return QSettings(str(path), QSettings.Format.IniFormat)
+
+
 def find_scanner_port(preferred):
     """Return the preferred port if present, otherwise a port that looks like
     a Uniden scanner (it can come back as /dev/ttyACM1 after a replug)."""
@@ -21032,7 +21041,7 @@ class Monitor(QMainWindow):
     def __init__(self):
         super().__init__()
         # Same settings key as v1.1.x, so the saved window layout carries over.
-        self.settings = QSettings("SDS100Monitor", "Monitor110")
+        self.settings = monitor_settings()
         self.archive_browser = None
         self.thread = None
         self.reception = None
@@ -24640,7 +24649,7 @@ class Monitor(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    saved = QSettings("SDS100Monitor", "Monitor110")
+    saved = monitor_settings()
     THEME = Theme(str(saved.value("theme/mode", "dark")), str(saved.value("theme/accent", "blue")),
                   str(saved.value("theme/size", "normal")), system_is_dark())
     window = Monitor()

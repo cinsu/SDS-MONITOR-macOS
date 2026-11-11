@@ -66,6 +66,7 @@ class VersionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, f"{script.name}: {result.stderr}")
 
 
+@unittest.skipIf(sys.platform == "darwin", "Linux install script; macOS uses launch-mac.sh")
 class InstallTests(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
@@ -85,6 +86,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn("already installed", again.stderr)
 
 
+@unittest.skipIf(sys.platform == "darwin", "Linux cleanup script; macOS uses launch-mac.sh")
 class CleanupTests(unittest.TestCase):
     def setUp(self):
         self.home = h = Path(tempfile.mkdtemp())
