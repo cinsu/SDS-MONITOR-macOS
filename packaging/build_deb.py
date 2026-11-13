@@ -55,6 +55,10 @@ def main(out):
         dest = root / f"usr/share/icons/hicolor/{size}x{size}/apps"
         dest.mkdir(parents=True)
         shutil.copy(png, dest / f"{NAME}.png")
+    widget = SRC / "plasma-widget"                     # 1.1.84: the Plasma 6 widget
+    if widget.is_dir():
+        widget_id = __import__("json").loads((widget / "metadata.json").read_text())["KPlugin"]["Id"]
+        shutil.copytree(widget, root / "usr/share/plasma/plasmoids" / widget_id, ignore=SKIP)
     doc = root / "usr/share/doc" / package
     doc.mkdir(parents=True)
     for f in ("README.md", "CHANGELOG.md"):

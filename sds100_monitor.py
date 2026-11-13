@@ -34,7 +34,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-VERSION = "1.1.80"
+VERSION = "1.1.84"
 
 # Qt 6.10's new PipeWire audio backend can crash the program while it lists audio devices at
 # start (segmentation fault inside PipeWire, seen with Qt 6.10.2 / PipeWire 1.6.2; it also prints
@@ -472,6 +472,15 @@ def add_request(values):
     return request
 
 
+def rr_frequency_request(frequency):
+    """Ask SDS-Manager to search RadioReference for a frequency (1.1.81). SDS-Manager does the search, with
+    its own RadioReference account, and shows the results; None if it isn't a frequency."""
+    match = re.search(r"\d+(?:\.\d+)?", str(frequency or ""))
+    if not match or not 25 <= float(match.group(0)) <= 1300:
+        return None
+    return {"action": "rr_freq", "frequency": f"{float(match.group(0)):.6f}"}
+
+
 def manager_version_key(name):
     m = re.search(r"(\d+)\.(\d+)\.(\d+)([a-z]?)", name)
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)) if m else (0, 0, 0, "")
@@ -534,6 +543,9 @@ def add_copy_actions(menu, row):
         menu.addAction("Edit in Manager…", lambda: edit_in_manager(manager_request(dict(zip(HEADERS, row)))))
         menu.addAction("Add to Favorites List in Manager…",
                        lambda: edit_in_manager(add_request(dict(zip(HEADERS, row)))))
+        search = rr_frequency_request(dict(zip(HEADERS, row)).get("Frequency"))
+        if search:
+            menu.addAction("Search Frequency in RadioReference (SDS-Manager)…", lambda: edit_in_manager(search))
 
 
 class HistoryArchiveBrowser(QDialog):
@@ -14099,6 +14111,151 @@ load();setInterval(load,10000);
 </script></body></html>"""
 
 
+# ---- Plasma widget (1.1.84) ------------------------------------------------------------------------------
+# The Scanner Information panel for a KDE Plasma 6 widget (plasma-widget/, installed by the .deb).
+# The Monitor keeps the scanner's port, so the widget asks the Monitor: a small server on
+# 127.0.0.1 (random port), with a token. Port and token go in ~/SDS100Monitor/widget.json (only
+# you can read it), which the widget reads when it can't reach the Monitor.
+WIDGET_FILE = DATA_DIR / "widget.json"
+WIDGET_ID = "com.github.jmlynchjr.sds100monitor"
+WIDGET_ACTIONS = {"channel_hold": "channel_hold", "scan": "scan", "avoid": "avoid_now",
+                  "unavoid": "unavoid_now"}
+WIDGET_COMPACT = ("Channel", "Frequency", "System", "Department", "Site", "Talkgroup", "Unit ID",
+                  "Mode", "RSSI")
+
+
+def widget_state(monitor):
+    """What the widget shows: the panel's lines as you set them up (labels, colours and the
+    conditional colours already worked out), plus a few plain values for the panel line."""
+    layout = getattr(monitor, "info_layout_now", None) or default_info_layout()
+    values = monitor.info_now()
+    panel, styles = info_styles(layout, values)
+    lines = [{"label": line["label"] if line["show_label"] else "", "text": info_text(line, values),
+              "fg": fg, "bg": bg, "size": line["size"], "bold": line["bold"]}
+             for line, (fg, bg) in zip(layout["lines"], styles)]
+    modes = getattr(monitor, "modes_window", None)
+    mode_text = modes.state_text if modes is not None else ""
+    last = getattr(monitor, "last_avoided", None)
+    return {"version": VERSION, "connected": bool(getattr(monitor, "connected", False)),
+            "receiving": bool(getattr(monitor, "reception", None)),
+            "panel_bg": panel, "lines": lines,
+            "values": {k: str(values.get(k, "") or "") for k in WIDGET_COMPACT},
+            "special_mode": mode_text if mode_text and not mode_text.startswith("Scanner:") else "",
+            "can_hold": bool(getattr(monitor, "current_channel_index", None)
+                             and getattr(monitor, "current_channel_type", None)),
+            "last_avoided": last[2] if last else ""}
+
+
+class WidgetServer(QObject):
+    """Serves widget_state() to the Plasma widget and takes its Hold / Scan / Avoid presses."""
+    control_requested = pyqtSignal(str)
+
+    def __init__(self, monitor):
+        super().__init__(monitor)
+        self.monitor = monitor
+        self.token = os.urandom(16).hex()
+        self.httpd = None
+        self.control_requested.connect(self.control)
+
+    @property
+    def enabled(self):
+        return str(self.monitor.settings.value("widget/enabled", "true")).lower() == "true"
+
+    def set_enabled(self, on):
+        self.monitor.settings.setValue("widget/enabled", "true" if on else "false")
+        self.start() if on else self.shutdown()
+
+    def control(self, action):
+        if action in WIDGET_ACTIONS:
+            self.monitor.control(WIDGET_ACTIONS[action])
+
+    def start(self):
+        if self.httpd is not None or not self.enabled:
+            return
+        srv = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def send(self, code, body):
+                data = json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+
+            def authorized(self):
+                q = parse_qs(urlparse(self.path).query)
+                given = self.headers.get("X-Token") or (q.get("t") or [""])[0]
+                return hmac.compare_digest(given, srv.token)
+
+            def do_GET(self):
+                if not self.authorized():
+                    return self.send(403, {"error": "forbidden"})
+                if urlparse(self.path).path == "/api/state":
+                    try:
+                        return self.send(200, widget_state(srv.monitor))
+                    except Exception as exc:          # never take the Monitor down for the widget
+                        return self.send(500, {"error": str(exc)})
+                self.send(404, {"error": "not found"})
+
+            def do_POST(self):
+                if not self.authorized():
+                    return self.send(403, {"error": "forbidden"})
+                u = urlparse(self.path)
+                action = (parse_qs(u.query).get("a") or [""])[0]
+                if u.path == "/api/control" and action in WIDGET_ACTIONS:
+                    srv.control_requested.emit(action)
+                    return self.send(200, {"ok": True})
+                self.send(400, {"error": "bad request"})
+
+        try:
+            port = int(self.monitor.settings.value("widget/port", 0) or 0)
+            self.httpd = ThreadingHTTPServer(("127.0.0.1", port), H)
+        except (OSError, ValueError) as exc:
+            self.httpd = None
+            print(f"Plasma widget server not started: {exc}", file=sys.stderr)
+            return
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.write_file()
+
+    def write_file(self):
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = WIDGET_FILE.with_suffix(".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                json.dump({"port": self.httpd.server_address[1], "token": self.token,
+                           "pid": os.getpid(), "version": VERSION}, f)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, WIDGET_FILE)
+        except OSError as exc:
+            print(f"Plasma widget file not written: {exc}", file=sys.stderr)
+
+    def shutdown(self):
+        if self.httpd is not None:
+            self.httpd.shutdown()
+            self.httpd.server_close()
+            self.httpd = None
+        try:
+            if WIDGET_FILE.exists() and json.loads(WIDGET_FILE.read_text()).get("pid") == os.getpid():
+                WIDGET_FILE.unlink()
+        except (OSError, ValueError):
+            pass
+
+
+def plasma_widget_installed():
+    """Where the widget is installed (system-wide by the .deb, or for you), or None."""
+    for base in (Path("/usr/share/plasma/plasmoids"),
+                 Path.home() / ".local/share/plasma/plasmoids"):
+        if (base / WIDGET_ID / "metadata.json").exists():
+            return base / WIDGET_ID
+    return None
+
+
 class MapServer(QObject):
     """Serves the map page and its data on 127.0.0.1 (random port, token)."""
     play_requested = pyqtSignal(str, str)
@@ -16703,6 +16860,10 @@ class CloseCallControl(QObject):
         if self.job is not None:
             self.say("Still working on the last Close Call request…")
             return
+        wx = getattr(self.monitor, "wx_priority", None)
+        if wx is not None and wx.busy and goal != "only":
+            self.say("The scanner's menu is busy with Weather Alert Priority; try again in a moment.")
+            return
         self.verify = None
         self.job = {"goal": goal, "target": target, "level": 0, "await": None,
                     "command": "", "retry": None, "expect_xml": False,
@@ -16916,6 +17077,216 @@ class CloseCallControl(QObject):
             self.say("✓ Close Call Only is running.", "ok")
         elif changed:
             self.changed.emit()
+
+
+class WeatherPriorityControl(QObject):
+    """1.1.83: Weather Alert Priority (on the scanner: Menu → Weather Operation → Weather
+    Alert Priority). With it on, the scanner keeps checking the weather channels for an
+    alert while it scans. The remote spec has no command for it, so it is set and read
+    through the scanner's Weather menu (MNU,WX → MSI → MSV → MSB), like the Close Call mode."""
+    changed = pyqtSignal()
+    ITEM = re.compile(r"priorit", re.I)
+    STEP_IN = re.compile(r"alert", re.I)        # if the item sits one menu deeper
+    CHOICES = {"on": re.compile(r"^\W*on\b", re.I), "off": re.compile(r"^\W*off\b", re.I)}
+
+    def __init__(self, monitor):
+        super().__init__(monitor)
+        self.monitor = monitor
+        self.job = None
+        self.message = ("", None)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.tick)
+        self.timer.start(500)
+
+    # ---- state -----------------------------------------------------------------------
+    @property
+    def busy(self):
+        return self.job is not None
+
+    @property
+    def state(self):
+        value = str(self.monitor.settings.value("modes/wx_priority", ""))
+        return value if value in self.CHOICES else ""
+
+    def remember(self, key):
+        self.monitor.settings.setValue("modes/wx_priority", key)
+        self.monitor.settings.setValue("modes/wx_priority_time",
+                                       datetime.now().strftime("%Y-%m-%d %H:%M"))
+        self.changed.emit()
+
+    def state_text(self):
+        if not self.state:
+            return "not known yet (press CHECK)"
+        when = str(self.monitor.settings.value("modes/wx_priority_time", ""))
+        return self.state.title() + (f" (as of {when})" if when else "")
+
+    @classmethod
+    def value_of(cls, text):
+        text = str(text or "").rsplit(":", 1)[-1]     # "Weather Alert Priority:Off" too
+        for key, pattern in cls.CHOICES.items():
+            if pattern.search(text):
+                return key
+        return None
+
+    def say(self, text, tone=None):
+        self.message = (text, tone)
+        self.monitor.statusBar().showMessage("Weather Alert Priority: " + text, 10000)
+        self.changed.emit()
+
+    def rsv(self):
+        return self.monitor.scanner_menu.rsv
+
+    # ---- actions ---------------------------------------------------------------------
+    def set(self, key):
+        self.start("set", key)
+
+    def check(self):
+        self.start("check")
+
+    def toggle(self):
+        self.set("off" if self.state == "on" else "on")
+
+    def start(self, goal, target=None):
+        if not self.monitor.connected:
+            self.say("Not connected to the scanner.", "bad")
+            return
+        if self.job is not None or self.monitor.close_call.busy:
+            self.say("The scanner's menu is busy with another request; try again in a moment.")
+            return
+        self.job = {"goal": goal, "target": target, "level": 0, "await": None,
+                    "command": "", "retry": None, "expect_xml": False,
+                    "deadline": 0.0, "chosen": None, "final": None}
+        self.say(f"Turning it {target}…" if goal == "set" else "Reading it from the scanner's menu…")
+        self.send("MNU,WX,")
+
+    # ---- commands --------------------------------------------------------------------
+    def send(self, command, retry=None):
+        job = self.job
+        if job is None:
+            return
+        if not self.monitor.queue(command):
+            self.fail("Not connected — nothing was sent.", open_menu=False)
+            return
+        job.update({"await": command.split(",")[0], "command": command, "retry": retry,
+                    "expect_xml": False, "deadline": time.monotonic() + CC_STEP_TIMEOUT_S})
+
+    def read_menu(self):
+        self.job.update({"expect_xml": True, "deadline": time.monotonic() + CC_STEP_TIMEOUT_S})
+        if not self.monitor.queue("MSI"):
+            self.fail("Not connected.", open_menu=False)
+
+    def msv(self, value):
+        rsv = self.rsv()
+        value = str(value).replace(",", "\t")
+        self.send(f"MSV,{rsv},{value}", retry=f"MSV,0,{value}" if rsv == "" else None)
+
+    def exit_menu(self, text, tone="ok"):
+        self.job["final"] = (text, tone)
+        rsv = self.rsv()
+        self.send(f"MSB,{rsv},RETURN_PREVOUS_MODE",     # spelling as in the spec
+                  retry="MSB,0,RETURN_PREVOUS_MODE" if rsv == "" else None)
+
+    def fail(self, text, open_menu=True):
+        self.job = None
+        if open_menu and self.monitor.connected:
+            text += (" The Scanner Menu window is open on the scanner's menu so you can "
+                     "finish there.")
+            self.monitor.scanner_menu.open()
+        self.say(text, "bad")
+
+    # ---- replies ---------------------------------------------------------------------
+    def route(self, reply):
+        job = self.job
+        if job is None:
+            return False
+        if (job["expect_xml"] and not job["await"] and reply.startswith("REPLY: MSI,")
+                and "<XML>" not in reply):
+            self.fail("The scanner says it isn't in a menu (MSI,"
+                      f"{reply[len('REPLY: MSI,'):].strip()}).")
+            return False
+        code = job["await"]
+        if not code or not reply.startswith(f"REPLY: {code},"):
+            return False
+        job["await"] = None
+        if not reply.rstrip().endswith(",OK"):
+            if job["retry"]:
+                self.send(job["retry"])
+            elif code == "MNU":
+                self.fail(f"The scanner refused to open its Weather menu "
+                          f"({reply[len('REPLY: '):]}). It may be busy (another menu, "
+                          "Analyze or a Discovery session).", open_menu=False)
+            elif code == "MSB":
+                self.fail("The change was made, but the scanner refused to leave the menu.")
+            else:
+                self.fail(f"The scanner refused {job['command']} ({reply[len('REPLY: '):]}).")
+            return True
+        if job["command"].startswith(("MSV,0", "MSB,0")) and self.rsv() == "":
+            self.monitor.scanner_menu.rsv = "0"
+            self.monitor.settings.setValue("menu/rsv", "0")
+        if code == "MNU":
+            self.read_menu()
+        elif code == "MSV" and job["chosen"] is not None:
+            self.remember(job["target"])
+            self.exit_menu(f"✓ Weather Alert Priority turned {job['target'].title()}.")
+        elif code == "MSV":
+            self.read_menu()
+        elif code == "MSB":
+            text, tone = job["final"] or ("Done.", "ok")
+            self.job = None
+            self.say(text, tone)
+        return True
+
+    def handle_xml(self, xml):
+        job = self.job
+        if job is None or not job["expect_xml"] or job["await"]:
+            return
+        job["expect_xml"] = False
+        try:
+            menu = parse_menu(xml)
+        except ET.ParseError:
+            self.fail("The scanner's menu reply couldn't be read.")
+            return
+        job["level"] += 1
+        if job["level"] > 3:
+            self.fail("The Weather menu didn't lead where expected.")
+            return
+        names = ", ".join(f"“{i['name']}”" for i in menu["items"][:8]) or "no items"
+        offered = {self.value_of(i["name"]) for i in menu["items"]} - {None}
+        if offered == {"on", "off"}:                    # the On / Off choice
+            if job["goal"] == "set":
+                item = cc_find_item(menu, self.CHOICES[job["target"]])
+                job["chosen"] = item
+                self.say(f"Choosing “{item['name']}”…")
+                self.msv(item["index"])
+                return
+            selected = next((i for i in menu["items"] if i["selected"]), None)
+            key = self.value_of(selected["name"]) if selected else self.value_of(menu["value"])
+            if key is None:
+                self.fail("The scanner's menu doesn't mark whether it's on or off.")
+                return
+            self.remember(key)
+            self.exit_menu(f"Weather Alert Priority is {key.title()}.")
+            return
+        item = cc_find_item(menu, self.ITEM)
+        if item is not None:
+            if job["goal"] == "check" and self.value_of(item["value"]):
+                key = self.value_of(item["value"])
+                self.remember(key)
+                self.exit_menu(f"Weather Alert Priority is {key.title()}.")
+                return
+            self.msv(item["index"])
+            return
+        deeper = cc_find_item(menu, self.STEP_IN, exclude=re.compile(r"only|same|fips", re.I))
+        if deeper is None or job["level"] > 1:
+            self.fail(f"Couldn't find Weather Alert Priority in “{menu['name']}” ({names}).")
+            return
+        self.msv(deeper["index"])
+
+    def tick(self):
+        job = self.job
+        if job is not None and job["deadline"] and time.monotonic() > job["deadline"]:
+            in_menu = job["level"] > 0 or job["await"] in ("MSV", "MSB") or job["expect_xml"]
+            self.fail("The scanner didn't answer in time.", open_menu=in_menu)
 
 
 class CloseCallNoteDialog(QDialog):
@@ -17425,6 +17796,79 @@ TONE_OUT_COOLDOWN_S = 60
 WX_ALERT_COOLDOWN_S = 600
 ROUTINE_SCREEN_TEXT = re.compile(r"^(scanning|searching|weather|wx|monitor|alert only|"
                                  r"no\s+thing|nothing|please wait|hold)\b", re.I)
+# 1.1.83: SAME group names. The scanner has no command that lists them, but while a SAME
+# mode runs its status report names the group (<WxMode SAME="GRVL"/>), so the name is
+# learned then. Names can also be typed (Modes → Weather → Name SAME Groups…); a typed
+# name is kept over a learned one.
+SAME_PLACEHOLDER = re.compile(r"^\s*SAME[\s_]*\d?\s*$", re.I)
+
+
+def same_names(settings):
+    """{1: "GRVL", …} for the SAME groups that have a name."""
+    names = {}
+    for n in range(1, 6):
+        name = str(settings.value(f"modes/same_name_{n}", "") or "").strip()
+        if name:
+            names[n] = name
+    return names
+
+
+def same_label(settings, key, label):
+    """WX_MODES label with the group's name added: "SAME 1 – GRVL"."""
+    m = re.fullmatch(r"SAME_(\d)", key)
+    name = same_names(settings).get(int(m.group(1))) if m else None
+    return f"{label} – {name}" if name else label
+
+
+def set_same_name(settings, n, name, typed):
+    """Store a group's name. A learned name never replaces one typed by hand."""
+    name = (name or "").strip()
+    if not typed and str(settings.value(f"modes/same_typed_{n}", "false")).lower() == "true":
+        return False
+    if not typed and (not name or SAME_PLACEHOLDER.match(name)):
+        return False
+    if str(settings.value(f"modes/same_name_{n}", "") or "") == name and not typed:
+        return False
+    settings.setValue(f"modes/same_name_{n}", name)
+    settings.setValue(f"modes/same_typed_{n}", "true" if typed and name else "false")
+    return True
+
+
+class SameNamesDialog(QDialog):
+    """Modes → Weather → Name SAME Groups…: type or clear the five group names."""
+
+    def __init__(self, monitor):
+        super().__init__(monitor)
+        self.setWindowTitle(f"SAME Group Names — SDS100 Monitor v{VERSION}")
+        self.settings = monitor.settings
+        outer = QVBoxLayout(self)
+        note = make_label("Names are learned from the scanner the first time each SAME group "
+                          "runs. Type a name to use your own (it's kept over the scanner's), or "
+                          "clear one so it's learned again. The counties in each group are set "
+                          "on the scanner: Menu → Weather Operation → Weather Alert → SAME.")
+        note.setWordWrap(True)
+        outer.addWidget(note)
+        form = QFormLayout()
+        names = same_names(self.settings)
+        self.edits = {}
+        for n in range(1, 6):
+            edit = QLineEdit(names.get(n, ""))
+            edit.setPlaceholderText("not learned yet")
+            self.edits[n] = edit
+            form.addRow(f"SAME {n}", edit)
+        outer.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                                   | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        outer.addWidget(buttons)
+
+    def save(self):
+        before = same_names(self.settings)
+        for n, edit in self.edits.items():
+            text = edit.text().strip()
+            if text != before.get(n, ""):
+                set_same_name(self.settings, n, text, typed=True)
 
 
 def _attrs(element):
@@ -17519,23 +17963,48 @@ class ScannerModesWindow(QWidget):
 
         wx = QGroupBox("WEATHER")
         grid = QGridLayout(wx)
+        self.wx_buttons = {}
+        self.same_pending = None   # 1.1.83: SAME group number started here, until its name is seen
+        self.same_started = 0.0
         for i, (key, label, tip) in enumerate(WX_MODES):
-            grid.addWidget(self.button(label, tip, lambda k=key: self.start_wx(k),
-                                       "#1b8a5a" if key == "NORMAL" else "#2167b1"),
-                           i // 4, i % 4)
+            b = self.button(label, tip, lambda k=key: self.start_wx(k),
+                            "#1b8a5a" if key == "NORMAL" else "#2167b1")
+            self.wx_buttons[key] = b
+            grid.addWidget(b, i // 4, i % 4)
+        self.update_same_labels()
+        # 1.1.83: Weather Alert Priority
+        pri = QHBoxLayout()
+        self.wx_pri_label = make_label("")
+        self.wx_pri_label.setToolTip("With Weather Alert Priority on, the scanner keeps checking "
+                                     "the weather channels for an alert while it scans "
+                                     "your Favorites Lists.")
+        pri.addWidget(self.wx_pri_label, 1)
+        wxp = monitor.wx_priority
+        for text, tip, slot, color in (
+                ("PRIORITY ON", "Turn Weather Alert Priority on (through the scanner's "
+                 "Weather menu)", lambda: wxp.set("on"), "#1b8a5a"),
+                ("PRIORITY OFF", "Turn Weather Alert Priority off", lambda: wxp.set("off"),
+                 "#8a5a1b"),
+                ("CHECK", "Read Weather Alert Priority from the scanner's menu", wxp.check,
+                 "#344d71")):
+            pri.addWidget(self.button(text, tip, slot, color))
+        grid.addLayout(pri, 2, 0, 1, 4)
+        wxp.changed.connect(self.update_priority)
         self.wx_alert_box = QCheckBox("Alert on the PC and phone when a weather alert is "
                                       "received")
         self.wx_alert_box.setChecked(self.flag("wx_alert"))
         self.wx_alert_box.toggled.connect(lambda on: self.set_flag("wx_alert", on))
-        grid.addWidget(self.wx_alert_box, 2, 0, 1, 4)
+        grid.addWidget(self.wx_alert_box, 3, 0, 1, 4)
         note = make_label("In the alert modes the scanner stays silent until the National "
                           "Weather Service sends an alert. NOAA tests the alert tone every "
                           "Wednesday, usually between 11 am and noon local time — a good "
                           "time to check it's working. The counties for SAME 1–5 are set "
-                          "on the scanner.")
+                          "on the scanner. Weather Alert Priority makes the scanner check "
+                          "for alerts while it scans your lists, without starting an alert mode.")
         note.setWordWrap(True)
         set_css(note, "color:#a5bdd2;")
-        grid.addWidget(note, 3, 0, 1, 4)
+        grid.addWidget(note, 4, 0, 1, 4)
+        self.update_priority()
         layout.addWidget(wx)
 
         tone = QGroupBox("TONE-OUT (fire and EMS paging)")
@@ -17638,8 +18107,50 @@ class ScannerModesWindow(QWidget):
             settings.setValue(self.geometry_key, self.saveGeometry())
 
     # ---- commands --------------------------------------------------------------------
+    def update_priority(self):
+        wxp = self.monitor.wx_priority
+        text, tone = wxp.message
+        line = f"<b>Weather Alert Priority:</b> {wxp.state_text()}"
+        if text and wxp.busy:
+            line += f" — {text}"
+        set_text(self.wx_pri_label, line)
+        if text and not wxp.busy:
+            self.say(f"Weather Alert Priority: {text}", tone)
+
+    def update_same_labels(self):
+        """Show the SAME group names on the buttons (1.1.83)."""
+        for key, label, _tip in WX_MODES:
+            b = self.wx_buttons.get(key)
+            if b is not None:
+                b.setText(same_label(self.monitor.settings, key, label))
+
+    def learn_same_name(self, wx_mode):
+        """While a SAME mode started here runs, the status report names the group."""
+        if self.same_pending is None:
+            return
+        if wx_mode is None:
+            return
+        name = _attrs(wx_mode).get("SAME", "")
+        # A report from the mode before can still arrive just after the change: wait a moment.
+        if not name or time.monotonic() - self.same_started < 1.5:
+            return
+        n = self.same_pending
+        if any(k != n and v == name for k, v in same_names(self.monitor.settings).items()):
+            return   # that's another group's name: the scanner hasn't switched yet
+        self.same_pending = None
+        m = re.fullmatch(r"\s*SAME[\s_]*(\d)\s*", name, re.I)
+        if m and int(m.group(1)) != n:
+            return   # the scanner is on another group than the one started here
+        if set_same_name(self.monitor.settings, n, name, typed=False):
+            self.update_same_labels()
+            self.say(f"SAME {n} is named \u201c{name}\u201d on the scanner.", "ok")
+
     def start_wx(self, key):
-        label = next(l for k, l, _t in WX_MODES if k == key).title()
+        label = same_label(self.monitor.settings, key,
+                           next(l for k, l, _t in WX_MODES if k == key).title())
+        m = re.fullmatch(r"SAME_(\d)", key)
+        self.same_pending = int(m.group(1)) if m else None
+        self.same_started = time.monotonic()
         if self.seq.start([(f"JPM,WX_MODE,{key}", [], f"Weather {label}")],
                           lambda ok: ok and self.say(f"✓ Weather {label} started.", "ok")):
             self.say(f"Starting Weather {label}…")
@@ -17745,12 +18256,16 @@ class ScannerModesWindow(QWidget):
                     f"{a.get('ToneA', '—')} / {a.get('ToneB', '—')}"
                     + (" • TONES DETECTED" if receiving else " • waiting"))
         elif wx_mode is not None or wx_ch is not None or v_screen == "wx_alert":
+            self.learn_same_name(wx_mode)
             m, c = _attrs(wx_mode), _attrs(wx_ch)
             same = m.get("SAME", "")
             text = (f"{m.get('Mode', 'Weather')}" + (f" ({same})" if same else "")
                     + f" • {c.get('Name', '')} {c.get('Freq', '')}".rstrip()
                     + (" • RECEIVING" if receiving else ""))
         else:
+            # Reports from before the mode change still arrive for a moment after starting it.
+            if self.same_pending is not None and time.monotonic() - self.same_started > 8:
+                self.same_pending = None
             text = f"Scanner: {root.attrib.get('Mode', '—')}"
         if text != self.state_text:
             self.state_text = text
@@ -21082,6 +21597,7 @@ class Monitor(QMainWindow):
         # Before build_ui: the Close Call menu in the menu bar uses them.
         self.close_call_log = CloseCallLog(self)
         self.close_call = CloseCallControl(self)
+        self.wx_priority = WeatherPriorityControl(self)
         self.close_call_window = None
         self.build_ui()
         self.discovery = DiscoveryWindow(self)
@@ -21105,6 +21621,8 @@ class Monitor(QMainWindow):
         self.gps = GpsManager(self)
         self.places_finder = PlacesFinder(self)
         self.map_server = MapServer(self)
+        self.widget_server = WidgetServer(self)
+        QTimer.singleShot(0, self.widget_server.start)
         self.places_window = None
         self.antenna_test = AntennaTester(self)
         self.antenna_window = None
@@ -21176,6 +21694,26 @@ class Monitor(QMainWindow):
             self.statusBar().showMessage("Nothing received yet: Edit in Manager uses the last channel heard.", 6000)
             return
         self.statusBar().showMessage(edit_in_manager(manager_request(self.last_heard), self), 8000)
+
+    def current_frequency(self):
+        return (self.last_heard or {}).get("Frequency") or self.info_values.get("Frequency", "")
+
+    def search_frequency_in_rr(self, ask=False):
+        """1.1.81: SDS-Manager searches RadioReference for the frequency and shows what uses it."""
+        frequency = self.current_frequency()
+        if ask or not rr_frequency_request(frequency):
+            text, ok = QInputDialog.getText(self, "Search Frequency in RadioReference",
+                                            "Frequency (MHz). SDS-Manager searches RadioReference with your account "
+                                            "and shows the results:",
+                                            text=str(frequency or "").replace("MHz", "").strip())
+            if not ok:
+                return
+            frequency = text
+        request = rr_frequency_request(frequency)
+        if request is None:
+            self.statusBar().showMessage("That isn't a frequency between 25 and 1300 MHz.", 6000)
+            return
+        self.statusBar().showMessage(edit_in_manager(request, self), 8000)
 
     def add_current_in_manager(self):
         if not self.last_heard:
@@ -21329,6 +21867,7 @@ class Monitor(QMainWindow):
         except ET.ParseError:
             xml = parts[-1]
         self.close_call.handle_xml(xml)
+        self.wx_priority.handle_xml(xml)
         self.scanner_menu.handle_xml(xml)
 
     def open_discovery(self, load=False):
@@ -21675,11 +22214,19 @@ class Monitor(QMainWindow):
         maps_sub.addAction("Aircraft (ADS-B)…", lambda: self.open_analysis("aircraft_window", AircraftWindow))
         tools_menu.addSeparator()
         tools_menu.addAction("Ten Codes…", lambda: self.open_analysis("ten_codes_window", TenCodesWindow))
+        widget_menu = tools_menu.addMenu("Plasma Widget")
+        self.widget_action = widget_menu.addAction("Share Scanner Information with the Widget",
+                                                   lambda on: self.widget_server.set_enabled(on))
+        self.widget_action.setCheckable(True)
+        self.widget_action.setChecked(str(self.settings.value("widget/enabled", "true")).lower() == "true")
+        widget_menu.addAction("How to Add the Widget…", self.plasma_widget_help)
         keypad_sub = tools_menu.addMenu("Macro Keypad")
         keypad_sub.addAction("Macro Keypad…", lambda: self.macro_keypad.open())
         tools_menu.addSeparator()
         tools_menu.addAction("Edit Current Channel in Manager…", self.edit_current_in_manager)
         tools_menu.addAction("Add Current Channel to Favorites List in Manager…", self.add_current_in_manager)
+        tools_menu.addAction("Search Frequency in RadioReference (SDS-Manager)…",
+                             lambda: self.search_frequency_in_rr(ask=True))
         discovery_menu = self.menuBar().addMenu("Discovery")
         discovery_menu.addAction("Discovery Control…", self.open_discovery)
         self.discovery_load_action = discovery_menu.addAction(
@@ -21715,13 +22262,26 @@ class Monitor(QMainWindow):
         modes_menu.addAction("Weather and Tone-Out…",
                              lambda: self.open_analysis("modes_window", ScannerModesWindow))
         wx_menu = modes_menu.addMenu("Weather")
+        self.wx_mode_actions = {}
         for key, label, tip in WX_MODES:
             action = wx_menu.addAction(
                 "Weather Scan" if key == "NORMAL" else f"Weather Alert: {label.title()}",
                 lambda k=key: (self.open_analysis("modes_window", ScannerModesWindow),
                                self.modes_window.start_wx(k)))
             action.setToolTip(tip)
+            self.wx_mode_actions[key] = action
+        wx_menu.addSeparator()
+        self.wx_pri_action = wx_menu.addAction("Weather Alert Priority",
+                                               lambda: self.wx_priority.toggle())
+        self.wx_pri_action.setCheckable(True)
+        self.wx_pri_action.setToolTip("Check the weather channels for alerts while scanning "
+                                      "(click to turn on or off)")
+        wx_menu.addAction("Check Weather Alert Priority", lambda: self.wx_priority.check())
+        wx_menu.addSeparator()
+        wx_menu.addAction("Name SAME Groups…", self.name_same_groups)
         wx_menu.setToolTipsVisible(True)
+        wx_menu.aboutToShow.connect(self.weather_menu_shown)
+        self.weather_menu_shown()
         modes_menu.addAction("Start Tone-Out",
                              lambda: (self.open_analysis("modes_window", ScannerModesWindow),
                                       self.modes_window.start_tone_out()))
@@ -22168,6 +22728,7 @@ class Monitor(QMainWindow):
         menu.addSeparator()
         menu.addAction("Edit in Manager…", self.edit_current_in_manager)
         menu.addAction("Add to Favorites List in Manager…", self.add_current_in_manager)
+        menu.addAction("Search Frequency in RadioReference (SDS-Manager)…", self.search_frequency_in_rr)
         menu.addSeparator()
         menu.addAction("Customize This Panel…", self.customize_info_panel)
         menu.exec(global_point)
@@ -22781,6 +23342,45 @@ class Monitor(QMainWindow):
 
     # ---- Transcription (v1.1.28) ------------------------------------------
     # ---- Analysis windows (v1.1.31) ---------------------------------------
+    def weather_menu_shown(self):
+        """1.1.83: the SAME items carry the group names (learned or typed)."""
+        for key, label, _tip in WX_MODES:
+            action = self.wx_mode_actions.get(key)
+            if action is not None and key.startswith("SAME_"):
+                action.setText("Weather Alert: " + same_label(self.settings, key, label.title()))
+        if getattr(self, "wx_pri_action", None) is not None:
+            state = self.wx_priority.state
+            self.wx_pri_action.setChecked(state == "on")
+            self.wx_pri_action.setText("Weather Alert Priority" + ("" if state else " (not checked yet)"))
+
+    def name_same_groups(self):
+        dialog = SameNamesDialog(self)
+        if dialog.exec():
+            dialog.save()
+            self.weather_menu_shown()
+            if self.modes_window is not None:
+                self.modes_window.update_same_labels()
+
+    def plasma_widget_help(self):
+        where = plasma_widget_installed()
+        installed = (f"The widget is installed ({where})." if where else
+                     "The widget isn't installed. The .deb installs it; from a folder install, run:\n"
+                     f"kpackagetool6 --type Plasma/Applet --install "
+                     f"{Path(__file__).resolve().parent / 'plasma-widget'}")
+        sharing = ("The Monitor is sharing the Scanner Information panel with it." if
+                   self.widget_server.httpd is not None else
+                   "Sharing is off (Tools → Plasma Widget → Share Scanner Information with the Widget).")
+        QMessageBox.information(
+            self, "Plasma Widget",
+            f"{installed}\n\n{sharing}\n\n"
+            "To add it: right-click the desktop or a panel → Add Widgets…, and search for "
+            "\u201cSDS100\u201d. On a panel it shows the channel and frequency (click for the full "
+            "panel); on the desktop it shows the full panel. It shows the lines, colours and "
+            "conditional colours you set in View → Customize Scanner Information….\n\n"
+            "The widget gets everything from the Monitor (the Monitor keeps the scanner's port), so "
+            "the Monitor has to be running; the widget has a button to start it. Nothing leaves "
+            "this PC: the Monitor only answers on 127.0.0.1, with a key only you can read.")
+
     def open_analysis(self, attr, cls):
         window = getattr(self, attr)
         if window is None:
@@ -23285,6 +23885,8 @@ class Monitor(QMainWindow):
         if self.screc_window.route(reply):
             return True
         if self.close_call.route(reply):
+            return True
+        if self.wx_priority.route(reply):
             return True
         if self.scanner_menu.route(reply):
             return True
@@ -24622,6 +25224,7 @@ class Monitor(QMainWindow):
         self.gps.shutdown()
         self.places_finder.shutdown()
         self.map_server.shutdown()
+        self.widget_server.shutdown()
         if self.transcription_window is not None:
             self.transcription_window.hide()
         if self.macro_keypad.window is not None:
@@ -24629,8 +25232,55 @@ class Monitor(QMainWindow):
         event.accept()
 
 
+APP_ID = "sds100-monitor"        # matches /usr/share/applications/sds100-monitor.desktop
+INSTANCE_SERVER = f"sds100-monitor-{os.getuid()}"
+
+
+def bring_forward_running(timeout_ms=500):
+    """1.1.82: if a Monitor is already running for this user, ask it to come forward. True if one answered."""
+    from PyQt6.QtNetwork import QLocalSocket
+    socket = QLocalSocket()
+    socket.connectToServer(INSTANCE_SERVER)
+    if not socket.waitForConnected(timeout_ms):
+        return False
+    socket.write(b"show\n")
+    socket.flush()
+    socket.waitForBytesWritten(timeout_ms)
+    socket.disconnectFromServer()
+    return True
+
+
+def listen_for_second_start(window):
+    """Answer bring_forward_running: un-minimise, raise and focus the window."""
+    from PyQt6.QtNetwork import QLocalServer
+    server = QLocalServer(window)
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
+    if not server.listen(INSTANCE_SERVER):
+        QLocalServer.removeServer(INSTANCE_SERVER)       # left behind by a crash: nobody answered on it
+        if not server.listen(INSTANCE_SERVER):
+            return None
+
+    def show_window():
+        while server.hasPendingConnections():
+            server.nextPendingConnection().disconnectFromServer()
+        if window.isMinimized():
+            window.showNormal()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+    server.newConnection.connect(show_window)
+    return server
+
+
 if __name__ == "__main__":
+    # 1.1.82: its own name and desktop entry, so the task manager doesn't group it with SDS-Manager (both are
+    # python3), and starting it again brings the open window forward instead of a second Monitor.
+    sys.argv[0] = APP_ID
+    QApplication.setApplicationName(APP_ID)
+    QApplication.setDesktopFileName(APP_ID)
     app = QApplication(sys.argv)
+    if not os.environ.get("SDS100_MONITOR_TEST_CLOSE_MS") and bring_forward_running():
+        os._exit(0)
     saved = QSettings("SDS100Monitor", "Monitor110")
     THEME = Theme(str(saved.value("theme/mode", "dark")), str(saved.value("theme/accent", "blue")),
                   str(saved.value("theme/size", "normal")), system_is_dark())
@@ -24638,6 +25288,7 @@ if __name__ == "__main__":
     # Last chance before exit to stop anything started while the window was closing.
     app.aboutToQuit.connect(window.transcriber.shutdown)
     window.show()
+    window.instance_server = listen_for_second_start(window)
     if os.environ.get("SDS100_MONITOR_TEST_CLOSE_MS"):        # used by tests/test_real_qt.py
         QTimer.singleShot(int(os.environ["SDS100_MONITOR_TEST_CLOSE_MS"]), window.close)
     code = app.exec()

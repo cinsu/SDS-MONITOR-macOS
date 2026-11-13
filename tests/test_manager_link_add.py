@@ -19,6 +19,40 @@ class AddRequestTests(unittest.TestCase):
         self.assertIn("Nothing to add", mon.edit_in_manager({"action": "add", "tgid": "", "frequency": ""}))
 
 
+class RadioReferenceSearchTests(unittest.TestCase):
+    def test_the_request_sds_manager_gets(self):                       # 1.1.81
+        self.assertEqual(mon.rr_frequency_request("154.2500MHz"), {"action": "rr_freq", "frequency": "154.250000"})
+        self.assertIsNone(mon.rr_frequency_request("—"))
+        self.assertIsNone(mon.rr_frequency_request("5"))
+
+    def test_from_the_window(self):
+        w = monitor(fresh=True)
+        sent, shown = [], []
+        old = mon.edit_in_manager
+        mon.edit_in_manager = lambda request, parent=None: sent.append(request) or "Starting the Manager…"
+        try:
+            w.statusBar = lambda: type("S", (), {"showMessage": lambda self, t, ms=0: shown.append(t)})()
+            w.last_heard = {"Frequency": "460.0250MHz"}
+            w.search_frequency_in_rr()
+            self.assertEqual(sent, [{"action": "rr_freq", "frequency": "460.025000"}])
+            mon.QInputDialog.getText = staticmethod(lambda *a, **k: ("xyz", True))
+            w.search_frequency_in_rr(ask=True)
+            self.assertEqual(len(sent), 1)
+            self.assertIn("isn't a frequency", shown[-1])
+        finally:
+            mon.edit_in_manager = old
+        del w
+
+
+class OneMonitorTests(unittest.TestCase):
+    def test_its_own_name_and_one_copy(self):                        # 1.1.82
+        self.assertEqual(mon.APP_ID, "sds100-monitor")
+        self.assertTrue(mon.INSTANCE_SERVER.startswith("sds100-monitor-"))
+        source = open(mon.__file__, encoding="utf-8").read()
+        self.assertIn("QApplication.setDesktopFileName(APP_ID)", source)
+        self.assertIn("bring_forward_running()", source)
+
+
 class ReloadTests(unittest.TestCase):
     def test_names_reload_when_the_file_changes(self):
         w = monitor(fresh=True)

@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "com.github.jmlynchjr.sds100monitor",
+        "Name": "SDS100 Scanner",
+        "Description": "Scanner Information from SDS100 Monitor: channel, frequency, talkgroup and more",
+        "Icon": "sds100-monitor",
+        "Category": "Utilities",
+        "Authors": [{ "Name": "J. Lynch" }],
+        "License": "GPL-3.0-or-later",
+        "Version": "1.1.84",
+        "Website": "https://github.com/jmlynchjr/SDS-MONITOR"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

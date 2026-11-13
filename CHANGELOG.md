@@ -2,6 +2,38 @@
 
 Newest first. Versions before 1.1.47 were tested by hand on a real SDS100; from 1.1.47 on, every version also passes the automated tests.
 
+## v1.1.84: Scanner Information as a Plasma widget
+
+- **New: an SDS100 Scanner widget for KDE Plasma 6.** Right-click the desktop or a panel → Add Widgets… and search for "SDS100".
+  - **On a panel:** the channel and frequency with a dot that lights up while receiving (you choose the fields in the widget's settings). Click it for the full panel; middle-click opens the Monitor.
+  - **On the desktop:** the full Scanner Information panel, with the lines, colours and conditional colours from View → Customize Scanner Information….
+  - **Buttons:** Hold, Scan, Avoid (press twice) and Remove avoid; they can be hidden in the widget's settings.
+  - Weather Alert and Tone-Out show in the widget's heading while they run.
+- The widget gets everything from the Monitor, which keeps the scanner's port, so the Monitor has to be running; the widget has a button to start it. The Monitor answers only on 127.0.0.1, with a key in ~/SDS100Monitor/widget.json that only you can read.
+- **Tools → Plasma Widget:** turn sharing off or on, and how to add the widget.
+- The .deb installs the widget for everyone; install.sh installs it for you.
+- New tests (7).
+
+## v1.1.83: SAME group names, and Weather Alert Priority
+
+- **New: the SAME groups show their names** in Modes → Weather and on the Weather and Tone-Out window's buttons ("Weather Alert: Same 1 – GRVL"). The scanner has no command that lists them, so each name is learned from the scanner's status report the first time that group is started from the Monitor.
+  - **Modes → Weather → Name SAME Groups…** to type your own names (kept over the scanner's), or clear one so it's learned again.
+- **New: Weather Alert Priority** (the scanner keeps checking the weather channels for alerts while it scans your lists). Turn it on or off, or check it, from the Weather and Tone-Out window (PRIORITY ON / PRIORITY OFF / CHECK) or Modes → Weather. It's set through the scanner's Weather menu, like the Close Call mode.
+- New tests (9).
+
+## v1.1.82: Its own task manager entry, and one Monitor at a time
+
+- **Fixed: SDS100 Monitor and SDS-Manager shared one task manager entry** (both run as python3), so the open windows were grouped together, and clicking the launcher for the one not shown started a second copy.
+  - The Monitor now has its own name and desktop entry (`sds100-monitor`); SDS-Manager 0.1.30 does the same (`sds-manager`). Each gets its own icon in the task manager.
+  - Starting the Monitor again, from the menu or `sds100-monitor`, brings the open window forward instead of opening a second Monitor (two would fight over the scanner's port).
+- New tests (1).
+
+## v1.1.81: Search a frequency in RadioReference
+
+- **New: Search Frequency in RadioReference (SDS-Manager)…** — right-click a reception or the Scanner Information panel, or Tools (where you can type any frequency). SDS-Manager 0.1.28 or later searches RadioReference for it with your own account and shows what uses it: conventional frequencies, and the site frequencies of trunked systems, in the county chosen in its Database Contents or the whole state. A conventional result can be added to a Favorites List from there.
+- The search is done by SDS-Manager, whose RadioReference access is approved; the Monitor only sends it the frequency.
+- New tests (2).
+
 ## v1.1.80: Scan profiles apply much faster
 
 - **Fixed: applying a scan profile was slow** (with many Favorites Lists it took long enough to look as if nothing happened). Each command waited for the scanner's answer before the next one was sent. Now all the reads go together, then all the changes, then all the checks; answers are matched by their list and system key numbers as they come back.
