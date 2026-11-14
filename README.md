@@ -8,7 +8,7 @@ It shows what the scanner is receiving, keeps a searchable reception history, re
 
 > SDS100 Monitor is an independent project. It is not made, endorsed or supported by Uniden. Uniden and SDS100 are trademarks of Uniden America Corporation. It uses the commands in Uniden's published SDS100 Remote Command Specification.
 
-**User manual:** [read it online](https://github.com/jmlynchjr/SDS-MONITOR/blob/main/docs/user-manual.md), or download the PDF from the [latest release](https://github.com/jmlynchjr/SDS-MONITOR/releases/latest).
+**User manual:** [read it online](https://github.com/cinsu/SDS-MONITOR/blob/main/docs/user-manual.md).
 
 ## What it does
 
