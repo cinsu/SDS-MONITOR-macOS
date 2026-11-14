@@ -1,6 +1,6 @@
 # SDS100 Monitor User Manual
 
-Version 1.1.80 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
+Version 1.1.84 · by J. Lynch, developed with the help of AI (Anthropic's Claude) · [PDF with each release](https://github.com/jmlynchjr/SDS-MONITOR/releases)
 
 Use the outline button (☰) at the top right of this file to jump to a chapter.
 
@@ -235,10 +235,10 @@ Most tools open in their own window rather than as a panel: the waterfall, the S
 |---|---|
 | **History** | Browse CSV archives…, Activity Charts…, Unit ID Log…, Unit Profile…, Audio Recordings…, Search Everything… (Ctrl+F), Fleet Map…, Incidents…, Daily Report…, Unit Name Suggestions… |
 | **View** | Transcription…, the four panels, Detach/Dock for each panel, Scanner Screen…, Waterfall…, Scanner Tools…, Return all panels to tabs, Theme |
-| **Tools** | Analyze…, Custom Search… (chapter 13), Antenna Test…; **Scanner ▸** Scanner Screen…, Scanner Menu…, Scanner Tools…, Command Console…; **Alerts ▸** Activity Watch…, Phone Alerts…, Send Calls to Rdio Scanner… (chapter 9); **Maps ▸** GPS…, Places and Map…, Aircraft (ADS-B)… (chapter 26); Ten Codes…; **Macro Keypad ▸** Macro Keypad… |
+| **Tools** | Analyze…, Custom Search… (chapter 13), Antenna Test…; **Scanner ▸** Scanner Screen…, Scanner Menu…, Scanner Tools…, Command Console…; **Alerts ▸** Activity Watch…, Phone Alerts…, Send Calls to Rdio Scanner… (chapter 9); **Maps ▸** GPS…, Places and Map…, Aircraft (ADS-B)… (chapter 26); Ten Codes…; **Plasma Widget ▸** Share Scanner Information with the Widget, How to Add the Widget… (chapter 5); **Macro Keypad ▸** Macro Keypad… |
 | **Discovery** | Discovery Control…, Load Sessions, Start Last Session, Exit Discovery (Resume Scan) |
 | **Close Call** | Close Call Hits…, Mode: Off / Priority / Do Not Disturb, Check Current Mode, Start Close Call Only, Resume Scan, Close Call Bands…, Close Call Settings on Scanner… |
-| **Modes** | Weather and Tone-Out…, Weather (Weather Scan; Weather Alert: Alert Only, SAME 1–5, All FIPS), Start Tone-Out, Scanner Recordings…, Resume Scan (chapter 20) |
+| **Modes** | Weather and Tone-Out…, Weather (Weather Scan; Weather Alert: Alert Only, SAME 1–5 with their names, All FIPS; Weather Alert Priority; Check Weather Alert Priority; Name SAME Groups…), Start Tone-Out, Scanner Recordings…, Resume Scan (chapter 20) |
 | **Help** | Check for Updates…, Project Page, About SDS100 Monitor (chapter 23) |
 
 **Ctrl+F** opens Search Everything from any SDS100 Monitor window.
@@ -314,6 +314,17 @@ Right-click a unit for **Name This Unit…** and the other unit actions (chapter
 - **Custom text** lines that combine fields, for example `{System} › {Department}`.
 
 **Conditional colours** change a line, or the whole panel, when a field matches: for example *Service type contains Fire → that line white on red*. Rules are checked in order and later ones win. Layouts can be saved as presets (for example *Large print*, *Night*). **Apply** previews; **Cancel** puts the panel back. The layout is kept in `~/SDS100Monitor/info_panel.json`.
+
+#### Plasma widget
+
+On KDE Plasma 6 the panel can also be a widget. Right-click the desktop or a panel → **Add Widgets…** and search for **SDS100**. The .deb installs the widget for everyone; `install.sh` installs it for you. If it isn't listed straight after installing, log out and back in once (or run `plasmashell --replace &`).
+
+- **On a panel** it shows the channel and frequency, with a dot that turns green while receiving. Click it for the full panel; middle-click opens the Monitor. The widget's **Configure…** window chooses what the panel line shows, for example `{Channel} • {Talkgroup}` (fields: Channel, Frequency, System, Department, Site, Talkgroup, Unit ID, Mode, RSSI).
+- **On the desktop** it shows the full panel, with the lines, colours and conditional colours set in **View → Customize Scanner Information…**.
+- **Hold**, **Scan**, **Avoid** (press twice) and **Remove avoid** buttons; **Configure…** can hide them.
+- While Weather Alert or Tone-Out runs, the heading says so.
+
+The Monitor keeps the scanner's port, so the widget gets everything from the Monitor: the Monitor has to be running, and the widget offers **Start SDS100 Monitor** when it isn't. The Monitor answers only on 127.0.0.1, with a key in `~/SDS100Monitor/widget.json` that only you can read. **Tools → Plasma Widget** turns this sharing off or on, and shows how to add the widget.
 
 #### Out-of-date warning
 
@@ -1429,6 +1440,10 @@ The **Modes** menu runs two of the scanner's special modes from the PC, with ale
 | **ALERT ONLY** | Any alert tone (1050 Hz) or SAME alert |
 | **SAME 1–5** | Alerts for the counties in that SAME group, set up on the scanner (Menu → Weather Operation → Weather Alert → SAME) |
 | **ALL FIPS** | A SAME alert for any county |
+
+**SAME group names.** The scanner has no command that lists its SAME groups, but while a SAME mode runs it reports the group's name. So the first time you start each group from the program, its name is learned and shown from then on, on the buttons and in **Modes → Weather** (for example *Weather Alert: Same 1 – GRVL*). **Modes → Weather → Name SAME Groups…** lets you type your own names (kept over the scanner's), or clear one so it's learned again.
+
+**Weather Alert Priority** keeps the scanner checking the weather channels for alerts while it scans your lists, without starting an alert mode. **PRIORITY ON**, **PRIORITY OFF** and **CHECK** in the window (or **Modes → Weather → Weather Alert Priority** / **Check Weather Alert Priority**) set or read it through the scanner's Weather menu, the same way the Close Call mode is set. If your firmware words the menu differently, the program says what it found and opens **Scanner Menu** so you can finish there.
 
 When an alert comes in (the scanner opens its audio, or shows an alert pop-up), the program shows a **desktop notification**, sends a **phone alert** if you've set them up (chapter 12), and logs it with the scanner's alert text. Repeats of the same alert are held back for 10 minutes.
 

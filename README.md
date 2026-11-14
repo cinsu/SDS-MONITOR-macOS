@@ -13,7 +13,7 @@ It shows what the scanner is receiving, keeps a searchable reception history, re
 ## What it does
 
 - **Live display:** system, department, channel, frequency, talkgroup, unit ID, signal, site and mode, with alerts on anything you choose, and phone alerts (ntfy, Pushover, Telegram or e-mail).
-- **Scanner control:** virtual keypad and knob, hold, avoid, jump to number tags, scanner menus, Close Call, Discovery, Weather and Tone-Out modes, a command console, screen mirror, waterfall, battery, and push updates.
+- **Scanner control:** virtual keypad and knob, hold, avoid, jump to number tags, scanner menus, Close Call, Discovery, Weather (with SAME group names and Weather Alert Priority) and Tone-Out modes, a command console, screen mirror, waterfall, battery, and push updates.
 - **Reception history:** every transmission in daily CSV files, with search, statistics, activity charts, unit ID log, unit names and profiles, fleet maps and Search Everything.
 - **Audio:** one MP3 per transmission from your PC's audio input, with metadata, and offline speech-to-text transcription (faster-whisper).
 - **Analysis:** incidents with one-line headlines and timelines, daily reports (window, PDF or HTML), Activity Watch for unusual activity, the scanner's Analyze functions (site health, channel load, unknown talkgroup and unit finder), and an antenna test.
@@ -22,6 +22,7 @@ It shows what the scanner is receiving, keeps a searchable reception history, re
 - **Rdio Scanner:** sends each recorded call to your Rdio Scanner server, to listen on your phone with talkgroup and unit names, at home or (through a VPN such as Tailscale) away.
 - **Places and GPS:** keeps the scanner's location updated from a GPS receiver or your phone, and maps the places mentioned in transcripts (OpenStreetMap).
 - **SDS-Manager link:** with [SDS-Manager](https://github.com/jmlynchjr/SDS-Manager) (a separate program for the scanner's Favorites Lists) installed, right-click a reception → **Edit in Manager…** or **Add to Favorites List in Manager…**; quick key names, number tags and scan profiles come from SDS-Manager, and a warning shows when the scanner is out of date.
+- **Plasma widget:** the Scanner Information panel as a KDE Plasma 6 widget, on a panel (channel and frequency, click for the full panel) or the desktop, with Hold, Scan and Avoid buttons. The .deb installs it; add it with **Add Widgets…** → "SDS100".
 - **Extras:** a USB macro keypad, themes (light, dark, night red, accent colours, text size) and a built-in update check.
 
 ## Install
